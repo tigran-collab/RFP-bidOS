@@ -198,8 +198,8 @@ export default function Dashboard({ onOpenOpportunity }) {
               </button>
               <span className="muted-text">
                 {" "}
-                — {item.reason}
-                {item.suggested_action ? ` → ${item.suggested_action}` : ""}
+                - {item.reason}
+                {item.suggested_action ? ` -> ${item.suggested_action}` : ""}
               </span>
             </li>
           ))}

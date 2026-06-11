@@ -203,7 +203,7 @@ export default function OpportunityDetail({ opportunityId }) {
       setEvaluations(evaluationsResult);
       setRequirements(requirementsResult);
       setActionMessage(
-        `Pursuit prep ${result.final_status} → next action: ${result.next_action}`,
+        `Pursuit prep ${result.final_status} -> next action: ${result.next_action}`,
       );
       setActionError(result.errors?.length ? result.errors.join("; ") : "");
     } catch {
@@ -294,7 +294,7 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionMessage(
         `Logistics extracted: deadline risk ${result.deadline_risk}, ` +
           `confidence ${result.logistics_confidence_score ?? "-"}` +
-          (result.has_parsed_text ? "" : " (no parsed text — metadata only)"),
+          (result.has_parsed_text ? "" : " (no parsed text - metadata only)"),
       );
       setActionError("");
     } catch {
@@ -527,13 +527,13 @@ export default function OpportunityDetail({ opportunityId }) {
       {pursuitResult ? (
         <div className="pursuit-result">
           <h3>
-            Pursuit Prep: {pursuitResult.final_status} → next action:{" "}
+            Pursuit Prep: {pursuitResult.final_status} {"->"} next action:{" "}
             {pursuitResult.next_action}
           </h3>
           <ul>
             {pursuitResult.step_results.map((step) => (
               <li key={step.step}>
-                <strong>{step.step}</strong>: {step.status} — {step.summary}
+                <strong>{step.step}</strong>: {step.status} - {step.summary}
               </li>
             ))}
           </ul>
@@ -572,6 +572,20 @@ export default function OpportunityDetail({ opportunityId }) {
         <DetailRow label="Bid decision" value={opportunity.bid_decision} />
         <DetailRow label="Bid score" value={opportunity.bid_score} />
         <DetailRow label="Bid reason" value={opportunity.bid_reason} />
+        <DetailRow
+          label="Scraper relevance"
+          value={
+            opportunity.relevance_decision
+              ? `${opportunity.relevance_decision} (${opportunity.relevance_score ?? "-"})`
+              : "-"
+          }
+        />
+        <DetailRow label="Keyword matches" value={parseList(opportunity.keyword_matches_json).join(", ")} />
+        <DetailRow label="Relevance reason" value={opportunity.relevance_reason} />
+        <DetailRow
+          label="As-needed caution"
+          value={opportunity.as_needed_warning ? "Yes" : "No"}
+        />
         <DetailRow label="AI recommendation" value={opportunity.ai_recommendation} />
         <DetailRow label="AI score" value={opportunity.ai_score} />
         <DetailRow label="AI reason" value={opportunity.ai_reason} />

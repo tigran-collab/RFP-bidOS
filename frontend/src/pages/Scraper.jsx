@@ -32,15 +32,18 @@ function formatResult(result) {
     return "";
   }
 
-  const filtered =
-    result.candidates_filtered !== undefined
-      ? `, ${result.candidates_kept} kept / ${result.candidates_filtered} filtered`
+  const relevance =
+    result.candidates_filtered_relevance !== undefined
+      ? `, ${result.candidates_filtered_quality || 0} quality filtered, ` +
+        `${result.candidates_filtered_relevance || 0} relevance filtered, ` +
+        `${result.relevant || 0} relevant, ${result.maybe_relevant || 0} maybe, ` +
+        `${result.as_needed_warning_count || 0} as-needed warnings`
       : "";
 
   if (result.sources_scraped !== undefined) {
     return (
       `${result.sources_scraped} sources scraped, ` +
-      `${result.records_found} records found${filtered}, ` +
+      `${result.records_found} kept${relevance}, ` +
       `${result.created_count} created, ` +
       `${result.updated_count || 0} updated, ` +
       `${result.skipped_duplicates} duplicates skipped`
@@ -48,7 +51,7 @@ function formatResult(result) {
   }
 
   return (
-    `${result.records_found} records found${filtered}, ` +
+    `${result.records_found} kept${relevance}, ` +
     `${result.created_count} created, ` +
     `${result.updated_count || 0} updated, ` +
     `${result.skipped_duplicates} duplicates skipped`
@@ -175,7 +178,9 @@ export default function Scraper() {
       setPreview({ sourceName: source.name, result });
       setMessage(
         `${source.name}: ${result.candidates_kept} kept, ` +
-          `${result.candidates_filtered} filtered (of ${result.total_candidates_found} found)`,
+          `${result.candidates_filtered_quality || 0} quality filtered, ` +
+          `${result.candidates_filtered_relevance || 0} relevance filtered ` +
+          `(of ${result.total_candidates_found} found)`,
       );
       setError("");
     } catch {
@@ -248,7 +253,7 @@ export default function Scraper() {
       const result = await getSourceScraperCapabilities(source.id);
       setCapabilities((current) => ({ ...current, [source.id]: result }));
     } catch {
-      // Non-fatal — capabilities notice will fall back to local state.
+      // Non-fatal: capabilities notice will fall back to local state.
     }
   }
 
@@ -365,7 +370,7 @@ export default function Scraper() {
                         }
                       >
                         {PORTAL_TYPES.map((pt) => (
-                          <option key={pt} value={pt}>{pt || "— Select —"}</option>
+                          <option key={pt} value={pt}>{pt || "- Select -"}</option>
                         ))}
                       </select>
                     </label>
@@ -479,6 +484,8 @@ export default function Scraper() {
                   <th>Due Date</th>
                   <th>Detail URL</th>
                   <th>Confidence</th>
+                  <th>Relevance</th>
+                  <th>Keywords</th>
                   <th>Service</th>
                   <th>Docs</th>
                 </tr>
@@ -491,6 +498,16 @@ export default function Scraper() {
                     <td>{candidate.due_date ? new Date(candidate.due_date).toLocaleString() : ""}</td>
                     <td className="break-text">{candidate.detail_url || candidate.source_url || ""}</td>
                     <td>{candidate.confidence_score}</td>
+                    <td>
+                      {candidate.relevance_decision || ""}
+                      {candidate.relevance_score !== null && candidate.relevance_score !== undefined
+                        ? ` (${candidate.relevance_score})`
+                        : ""}
+                      {candidate.as_needed_warning ? (
+                        <div className="notice-text">As-needed caution</div>
+                      ) : null}
+                    </td>
+                    <td>{candidate.keyword_matches?.join(", ") || ""}</td>
                     <td>{candidate.service_type || ""}</td>
                     <td>{candidate.document_count}</td>
                   </tr>

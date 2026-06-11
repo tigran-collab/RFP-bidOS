@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -13,6 +14,7 @@ from app.services.scrapers.extraction_utils import (
     is_document_url,
 )
 from app.services.scrapers.quality import assess_candidate
+from app.services.scrapers.keywords import score_candidate_relevance
 
 DISCOVERY_USER_AGENT = "RFP-BidOS Public Scraper/0.2 (+document-discovery)"
 
@@ -31,14 +33,20 @@ def preview_source(
         return result
 
     candidates = _scrape_candidates(source_config, result, detail_limit=detail_limit)
-    kept, filtered, reasons = _filter_candidates(candidates, source_config)
+    quality_kept, quality_filtered, reasons = _filter_candidates(candidates, source_config)
+    kept, relevance_filtered = _apply_relevance_filter(quality_kept)
+    relevance_counts = _relevance_counts(kept, relevance_filtered)
 
     result["total_candidates_found"] = len(candidates)
+    result["candidates_found"] = len(candidates)
     result["candidates_kept"] = len(kept)
-    result["candidates_filtered"] = len(filtered)
+    result["candidates_filtered"] = len(quality_filtered)
+    result["candidates_filtered_quality"] = len(quality_filtered)
+    result["candidates_filtered_relevance"] = len(relevance_filtered)
     result["filter_reasons"] = reasons
     result["records_found"] = len(kept)
-    shown = kept + filtered if include_filtered else kept
+    result.update(relevance_counts)
+    shown = kept + quality_filtered + relevance_filtered if include_filtered else kept
     result["candidates"] = [_candidate_to_dict(candidate) for candidate in shown]
     return result
 
@@ -56,12 +64,18 @@ def scrape_source(source_config) -> dict:
         return result
 
     candidates = _scrape_candidates(source_config, result)
-    kept, filtered, reasons = _filter_candidates(candidates, source_config)
+    quality_kept, quality_filtered, reasons = _filter_candidates(candidates, source_config)
+    kept, relevance_filtered = _apply_relevance_filter(quality_kept)
+    relevance_counts = _relevance_counts(kept, relevance_filtered)
     result["total_candidates_found"] = len(candidates)
+    result["candidates_found"] = len(candidates)
     result["candidates_kept"] = len(kept)
-    result["candidates_filtered"] = len(filtered)
+    result["candidates_filtered"] = len(quality_filtered)
+    result["candidates_filtered_quality"] = len(quality_filtered)
+    result["candidates_filtered_relevance"] = len(relevance_filtered)
     result["filter_reasons"] = reasons
     result["records_found"] = len(kept)
+    result.update(relevance_counts)
 
     with Session(engine) as session:
         for candidate in kept:
@@ -191,6 +205,47 @@ def _filter_candidates(
     return kept, filtered, reasons
 
 
+def _apply_relevance_filter(
+    candidates: list[ScraperResult],
+) -> tuple[list[ScraperResult], list[ScraperResult]]:
+    kept: list[ScraperResult] = []
+    filtered: list[ScraperResult] = []
+    for candidate in candidates:
+        relevance = score_candidate_relevance(candidate)
+        _set_candidate_relevance(candidate, relevance)
+        if relevance["relevance_decision"] in {"Relevant", "Maybe Relevant"}:
+            kept.append(candidate)
+        else:
+            filtered.append(candidate)
+    return kept, filtered
+
+
+def _set_candidate_relevance(candidate: ScraperResult, relevance: dict) -> None:
+    candidate.relevance_score = relevance["relevance_score"]
+    candidate.keyword_matches = relevance["keyword_matches"]
+    candidate.negative_matches = relevance["negative_matches"]
+    candidate.as_needed_matches = relevance["as_needed_matches"]
+    candidate.relevance_decision = relevance["relevance_decision"]
+    candidate.relevance_reason = relevance["relevance_reason"]
+
+
+def _relevance_counts(
+    kept: list[ScraperResult], filtered: list[ScraperResult]
+) -> dict[str, int]:
+    all_scored = kept + filtered
+    return {
+        "candidates_saved": len(kept),
+        "relevant": sum(1 for c in all_scored if c.relevance_decision == "Relevant"),
+        "maybe_relevant": sum(
+            1 for c in all_scored if c.relevance_decision == "Maybe Relevant"
+        ),
+        "not_relevant": sum(
+            1 for c in all_scored if c.relevance_decision == "Not Relevant"
+        ),
+        "as_needed_warning_count": sum(1 for c in all_scored if c.as_needed_matches),
+    }
+
+
 def _auth_skip_message(source_config) -> str | None:
     requires_credentials = bool(getattr(source_config, "requires_credentials", False))
     name = (getattr(source_config, "name", "") or "").lower()
@@ -228,6 +283,7 @@ def _find_existing_opportunity(session: Session, candidate: ScraperResult, sourc
 
 
 def _create_opportunity(candidate: ScraperResult, source_config) -> Opportunity:
+    warning = _as_needed_warning_text()
     return Opportunity(
         title=candidate.title,
         agency=candidate.agency or getattr(source_config, "name", None),
@@ -244,6 +300,19 @@ def _create_opportunity(candidate: ScraperResult, source_config) -> Opportunity:
         estimated_value=candidate.estimated_value,
         status="Needs Review",
         bid_decision="Needs Review",
+        review_status=(
+            "Needs Review"
+            if candidate.relevance_decision == "Maybe Relevant"
+            else "New"
+        ),
+        next_action="Manual Review" if candidate.as_needed_matches else None,
+        notes=warning if candidate.as_needed_matches else None,
+        relevance_score=candidate.relevance_score,
+        relevance_decision=candidate.relevance_decision,
+        keyword_matches_json=json.dumps(candidate.keyword_matches),
+        negative_matches_json=json.dumps(candidate.negative_matches),
+        as_needed_warning=bool(candidate.as_needed_matches),
+        relevance_reason=candidate.relevance_reason,
         updated_at=_utc_now(),
     )
 
@@ -269,7 +338,39 @@ def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResu
     if not opportunity.source_url and (candidate.detail_url or candidate.source_url):
         opportunity.source_url = candidate.detail_url or candidate.source_url
         updated = True
+    relevance_updated = _update_relevance_metadata(opportunity, candidate)
+    updated = updated or relevance_updated
     return updated
+
+
+def _update_relevance_metadata(opportunity: Opportunity, candidate: ScraperResult) -> bool:
+    updates = {
+        "relevance_score": candidate.relevance_score,
+        "relevance_decision": candidate.relevance_decision,
+        "keyword_matches_json": json.dumps(candidate.keyword_matches),
+        "negative_matches_json": json.dumps(candidate.negative_matches),
+        "as_needed_warning": bool(candidate.as_needed_matches),
+        "relevance_reason": candidate.relevance_reason,
+    }
+    changed = False
+    for field, value in updates.items():
+        if getattr(opportunity, field) != value:
+            setattr(opportunity, field, value)
+            changed = True
+
+    if candidate.as_needed_matches:
+        warning = _as_needed_warning_text()
+        if not opportunity.next_action:
+            opportunity.next_action = "Manual Review"
+            changed = True
+        if warning not in (opportunity.notes or ""):
+            opportunity.notes = f"{opportunity.notes}\n{warning}".strip() if opportunity.notes else warning
+            changed = True
+    return changed
+
+
+def _as_needed_warning_text() -> str:
+    return "As-needed / no-guaranteed-minimum language detected. Review before pursuing."
 
 
 def _attach_document_urls(
@@ -324,6 +425,13 @@ def _candidate_to_dict(candidate: ScraperResult) -> dict:
         "document_candidate_count": len(candidate.document_candidates),
         "confidence_score": candidate.confidence_score,
         "quality_score": candidate.quality_score,
+        "relevance_score": candidate.relevance_score,
+        "keyword_matches": candidate.keyword_matches,
+        "negative_matches": candidate.negative_matches,
+        "as_needed_matches": candidate.as_needed_matches,
+        "as_needed_warning": bool(candidate.as_needed_matches),
+        "relevance_decision": candidate.relevance_decision,
+        "relevance_reason": candidate.relevance_reason,
     }
 
 
@@ -336,8 +444,16 @@ def _empty_result() -> dict:
     return {
         "records_found": 0,
         "total_candidates_found": 0,
+        "candidates_found": 0,
         "candidates_kept": 0,
         "candidates_filtered": 0,
+        "candidates_filtered_quality": 0,
+        "candidates_filtered_relevance": 0,
+        "candidates_saved": 0,
+        "relevant": 0,
+        "maybe_relevant": 0,
+        "not_relevant": 0,
+        "as_needed_warning_count": 0,
         "filter_reasons": {},
         "created_count": 0,
         "updated_count": 0,

@@ -824,7 +824,9 @@ def scrape_enabled_sources_command() -> None:
 def preview_source_command(
     source_id: int,
     show_filtered: bool = typer.Option(
-        False, "--show-filtered", help="Also show candidates rejected by the quality filter"
+        False,
+        "--show-filtered",
+        help="Also show candidates rejected by quality or relevance filters",
     ),
 ) -> None:
     with Session(engine) as session:
@@ -878,14 +880,23 @@ def preview_enabled_sources_command(
         typer.echo(
             f"{source.name} [{source.state or '-'} | {source.portal_type or '-'}]: "
             f"{result.get('total_candidates_found', 0)} found, "
+            f"{result.get('candidates_filtered_quality', 0)} quality filtered, "
+            f"{result.get('candidates_filtered_relevance', 0)} relevance filtered, "
+            f"{result.get('relevant', 0)} relevant, "
+            f"{result.get('maybe_relevant', 0)} maybe, "
+            f"{result.get('as_needed_warning_count', 0)} as-needed warnings, "
             f"{result.get('candidates_kept', 0)} kept, "
-            f"{result.get('candidates_filtered', 0)} filtered, "
             f"{len(result['errors'])} errors"
         )
         for candidate in result.get("candidates", [])[:top]:
+            matches = ", ".join(candidate.get("keyword_matches") or []) or "-"
+            warning = " | AS-NEEDED WARNING" if candidate.get("as_needed_warning") else ""
             typer.echo(
                 f"  - {candidate['title'][:90]} "
-                f"(quality: {candidate.get('quality_score')}, "
+                f"({candidate.get('relevance_decision') or '-'} "
+                f"{candidate.get('relevance_score')}, "
+                f"matches: {matches}{warning}, "
+                f"quality: {candidate.get('quality_score')}, "
                 f"docs: {candidate.get('document_count')}, "
                 f"doc links: {candidate.get('document_candidate_count')})"
             )
@@ -985,13 +996,33 @@ def download_documents_command(opportunity_id: int) -> None:
 
 
 @cli.command("download-all-documents")
-def download_all_documents_command() -> None:
+def download_all_documents_command(
+    limit: int = typer.Option(
+        10,
+        "--limit",
+        help="Max opportunities to process; use deliberately for larger batches",
+    ),
+    status: str = typer.Option(
+        None,
+        "--status",
+        help="Optional review status filter, e.g. Pursue or Watchlist",
+    ),
+) -> None:
+    if limit < 1:
+        typer.echo("--limit must be at least 1", err=True)
+        raise typer.Exit(code=1)
+
     total_downloaded = 0
     total_skipped = 0
     total_errors: list[str] = []
 
     with Session(engine) as session:
-        opportunities = list(session.exec(select(Opportunity)).all())
+        statement = select(Opportunity)
+        if status:
+            statement = statement.where(Opportunity.review_status == status)
+        opportunities = list(session.exec(statement).all())
+        matched_count = len(opportunities)
+        opportunities = opportunities[:limit]
         for opportunity in opportunities:
             result = download_documents_for_opportunity(opportunity.id, session)
             total_downloaded += result["downloaded_count"]
@@ -1004,8 +1035,14 @@ def download_all_documents_command() -> None:
 
     typer.echo(
         f"Summary: {total_downloaded} downloaded, "
-        f"{total_skipped} skipped, {len(total_errors)} errors"
+        f"{total_skipped} skipped, {len(total_errors)} errors "
+        f"({len(opportunities)} processed of {matched_count} matched, limit {limit})"
     )
+    if matched_count > limit:
+        typer.echo(
+            f"WARNING: {matched_count - limit} matched opportunities were not processed. "
+            "Increase --limit deliberately if needed."
+        )
 
 
 @cli.command("parse-document")
@@ -1159,8 +1196,12 @@ def run_scrape_for_source(source: SourceConfig) -> dict:
 def _echo_scrape_result(source_name: str, result: dict) -> None:
     typer.echo(
         f"{source_name}: {result.get('total_candidates_found', result['records_found'])} found, "
+        f"{result.get('candidates_filtered_quality', result.get('candidates_filtered', 0))} quality filtered, "
+        f"{result.get('candidates_filtered_relevance', 0)} relevance filtered, "
+        f"{result.get('relevant', 0)} relevant, "
+        f"{result.get('maybe_relevant', 0)} maybe, "
+        f"{result.get('as_needed_warning_count', 0)} as-needed warnings, "
         f"{result.get('candidates_kept', result['records_found'])} kept, "
-        f"{result.get('candidates_filtered', 0)} filtered, "
         f"{result['created_count']} created, "
         f"{result['updated_count']} updated, "
         f"{result['skipped_duplicates']} skipped duplicates, "
@@ -1190,7 +1231,10 @@ def _echo_auth_status(result: dict) -> None:
 
 def _scrape_summary(result: dict) -> str:
     return (
-        f"{result['records_found']} candidates, "
+        f"{result.get('total_candidates_found', result['records_found'])} found, "
+        f"{result.get('candidates_filtered_quality', 0)} quality filtered, "
+        f"{result.get('candidates_filtered_relevance', 0)} relevance filtered, "
+        f"{result.get('records_found', 0)} kept, "
         f"{result['created_count']} created, "
         f"{result['updated_count']} updated, "
         f"{result['skipped_duplicates']} skipped duplicates, "

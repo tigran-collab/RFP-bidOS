@@ -24,6 +24,12 @@ class ScraperResult:
     raw_text: str | None = None
     confidence_score: float = 0.0
     quality_score: float = 0.0
+    relevance_score: int | None = None
+    keyword_matches: list[str] = field(default_factory=list)
+    negative_matches: list[str] = field(default_factory=list)
+    as_needed_matches: list[str] = field(default_factory=list)
+    relevance_decision: str | None = None
+    relevance_reason: str | None = None
 
 
 class BaseScraperAdapter(Protocol):

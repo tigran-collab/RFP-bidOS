@@ -4,7 +4,7 @@ Local-first FastAPI and React dashboard for RFP bid tracking, public-page discov
 
 ## Backend Setup
 
-```powershell
+```cmd
 cd backend
 python -m venv .venv
 .venv\Scripts\activate.bat
@@ -15,7 +15,7 @@ python -m app.cli seed-demo
 
 ## Frontend Setup
 
-```powershell
+```cmd
 cd frontend
 npm.cmd install
 npm.cmd run build
@@ -25,21 +25,45 @@ npm.cmd run build
 
 Backend:
 
-```powershell
+```cmd
 cd backend
-uvicorn app.main:app --reload
+uvicorn app.main:app
 ```
 
 Frontend:
 
-```powershell
+```cmd
 cd frontend
 npm.cmd run dev
 ```
 
+## Desktop Launcher
+
+Double-click `start_rfp_bidos.bat` from the project root to start the app.
+
+The launcher opens two CMD windows:
+
+- `RFP BidOS Backend`
+- `RFP BidOS Frontend`
+
+Keep both windows open while using the app. Closing those windows stops the app.
+
+The launcher waits briefly, then opens:
+
+```cmd
+http://localhost:5173
+```
+
+To create a Desktop shortcut:
+
+1. Right-click `start_rfp_bidos.bat`.
+2. Choose **Show more options** if needed.
+3. Choose **Send to > Desktop (create shortcut)**.
+4. Rename the shortcut to `RFP BidOS`.
+
 ## Developer Checks
 
-```powershell
+```cmd
 cd backend
 python -m app.cli init-db
 python -m app.cli seed-demo
@@ -54,29 +78,29 @@ python -m app.cli extract-all-requirements
 
 Install Ollama, then pull the local model:
 
-```powershell
+```cmd
 ollama pull qwen2.5:3b
 ```
 
 Run local AI evaluation:
 
-```powershell
+```cmd
 cd backend
 python -m app.cli ai-evaluate-all-opportunities
 ```
 
 Environment variables:
 
-```powershell
-OLLAMA_MODEL=qwen2.5:3b
-OLLAMA_BASE_URL=http://127.0.0.1:11434
+```cmd
+set OLLAMA_MODEL=qwen2.5:3b
+set OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
 Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
 
 ## Parsing
 
-```powershell
+```cmd
 cd backend
 python -m app.cli parse-all-documents
 ```
@@ -87,7 +111,7 @@ PDF parsing uses `pypdf` by default. PyMuPDF is optional and used only as a fall
 
 Parse documents first, then extract requirements:
 
-```powershell
+```cmd
 cd backend
 python -m app.cli parse-opportunity-documents 1
 python -m app.cli extract-requirements 1
@@ -98,7 +122,7 @@ Requirements extraction is local-AI-assisted through Ollama and creates a human-
 
 ## Scraper
 
-```powershell
+```cmd
 cd backend
 python -m app.cli preview-source <source_id>
 python -m app.cli scrape-source <source_id>
@@ -111,13 +135,28 @@ The scraper uses source adapters and heuristics for public procurement pages, ta
 
 The public scraper uses heuristic quality filters to reduce page navigation/footer noise (e.g. "Home", "Contact", "Mobile main navigation") before candidates are saved as opportunities. Filtered counts and reasons are reported by `preview-source`, `preview-enabled-sources`, and `scrape-enabled-sources`; use `--show-filtered` on the preview commands to inspect rejected candidates. Results still require human review.
 
+## Scraper Relevance Filtering
+
+The scraper is keyword-directed toward security services opportunities, especially security guard, armed/unarmed security, patrol, facility security, access control, fire watch, lobby security, alarm response, and similar public safety officer work.
+
+Scraped candidates pass through two filters before they are saved:
+
+1. Quality filtering removes obvious page chrome, navigation links, social links, and generic non-opportunity pages.
+2. Relevance filtering scores target security keywords, procurement signals, dates, solicitation numbers, and document links, while rejecting unrelated service categories such as janitorial, landscaping, construction, IT-only work, fleet, supplies, legal/accounting, weapons/ammunition, and similar non-service opportunities.
+
+Only `Relevant` and `Maybe Relevant` candidates are saved. `Not Relevant` candidates can be inspected with preview debug output but are not saved by normal scraping.
+
+As-needed, on-call, standby, bench, task-order, blanket, indefinite-quantity, and no-guaranteed-minimum language is flagged as a caution item. These opportunities are not automatically rejected when they otherwise match security services, but they are marked for manual review before pursuing.
+
+Human review is still required before pursuing or declining any opportunity.
+
 The public scraper attempts to discover solicitation document links (PDFs, addenda, bid packets, specifications, forms, attachments, and other downloadable files) from public pages. Each discovered link gets a confidence score and reason; social/login/nav links are rejected. Downloading and parsing are separate steps:
 
-```powershell
+```cmd
 cd backend
 python -m app.cli discover-documents <opportunity_id>
-python -m app.cli download-all-documents
-python -m app.cli parse-all-documents
+python -m app.cli download-documents <opportunity_id>
+python -m app.cli parse-opportunity-documents <opportunity_id>
 ```
 
 Some portals hide documents behind JavaScript or login and will require future controlled support.
@@ -136,7 +175,7 @@ Scraper limitations:
 
 Seed curated real public procurement sources for California, Texas, Nevada, and Arizona, then smoke-test them:
 
-```powershell
+```cmd
 cd backend
 python -m app.cli seed-sources
 python -m app.cli preview-enabled-sources
@@ -145,7 +184,7 @@ python -m app.cli scrape-enabled-sources
 
 Notes:
 
-- Seeded sources are public pages only — no login is required or attempted.
+- Seeded sources are public pages only - no login is required or attempted.
 - Seeding is idempotent; rerunning `seed-sources` does not create duplicates.
 - JavaScript-heavy portals (Cal eProcure, Texas ESBD, Arizona Procurement Portal, SF City Partner) are seeded disabled with notes, since the HTML scraper gets limited results from them.
 - Government portal structures change frequently; scraper results always require human review.
@@ -164,7 +203,7 @@ Notes:
   - Rate-limit awareness and human-controlled execution.
   - Explicit user confirmation before any credential submission.
 - Scraper capabilities can be checked per source:
-  ```powershell
+  ```cmd
   python -m app.cli source-capabilities <source_id>
   python -m app.cli all-source-capabilities
   ```
@@ -174,7 +213,7 @@ Notes:
 
 CSV exports are available for opportunities, requirements, documents, and logistics QA. They are intended for review, sharing, backup, and proposal planning. **No proposal PDFs are generated in this phase.**
 
-```powershell
+```cmd
 cd backend
 python -m app.cli export-opportunities --output exports/opportunities.csv
 python -m app.cli export-requirements --output exports/requirements.csv
@@ -190,31 +229,31 @@ Use manual entry for BidNet, PlanetBids, emails, PDFs, screenshots, and portals 
 
 Manual document URLs can be attached to an opportunity, then downloaded, parsed, evaluated, and processed through pursuit prep like any other document. **Manual entry does not submit anything to any portal.**
 
-```powershell
+```cmd
 cd backend
 python -m app.cli add-opportunity --title "Manual Test Security RFP" --agency "Test Agency" --source-url "https://example.gov/rfp" --due-date 2099-01-01
 python -m app.cli update-opportunity 1 --review-status Pursue --priority High --next-action "Download Documents"
 python -m app.cli attach-document-url 1 --url "https://example.gov/test.pdf" --label "Manual RFP document"
 ```
 
-API: `POST /opportunities` (create), `PATCH /opportunities/{id}` (edit — only supplied fields are changed), and `POST /opportunities/{id}/documents/manual-url` (attach a document URL). The frontend has a **New Opportunity** page, an **Edit Opportunity** panel on the detail page, and a manual document URL input.
+API: `POST /opportunities` (create), `PATCH /opportunities/{id}` (edit - only supplied fields are changed), and `POST /opportunities/{id}/documents/manual-url` (attach a document URL). The frontend has a **New Opportunity** page, an **Edit Opportunity** panel on the detail page, and a manual document URL input.
 
 ## Bid Logistics
 
-The app extracts critical bid logistics — proposal due date, Q&A deadline, pre-bid meeting date and whether it is mandatory, submission method/portal, required forms, and deadline risk — from parsed document text and opportunity metadata using deterministic regex/heuristics (no AI required, no network).
+The app extracts critical bid logistics - proposal due date, Q&A deadline, pre-bid meeting date and whether it is mandatory, submission method/portal, required forms, and deadline risk - from parsed document text and opportunity metadata using deterministic regex/heuristics (no AI required, no network).
 
 - Extraction is heuristic and **requires human verification**.
-- Deadline risk: `Past Due`, `High` (≤3 days), `Medium` (≤7 days), `Low` (>7 days), `Missing Deadline` (no date found), or `Needs Review` (conflicting dates).
+- Deadline risk: `Past Due`, `High` (3 days or less), `Medium` (7 days or less), `Low` (more than 7 days), `Missing Deadline` (no date found), or `Needs Review` (conflicting dates).
 - Conflicting or ambiguous deadlines are recorded in `logistics_notes`, confidence is lowered, and risk is marked `Needs Review`.
 
-```powershell
+```cmd
 cd backend
 python -m app.cli extract-logistics 1
 python -m app.cli extract-logistics-by-status --status Pursue --limit 10
 python -m app.cli extract-logistics-all --limit 25
 ```
 
-API: `POST /opportunities/{id}/extract-logistics` and `POST /opportunities/extract-logistics` (optional `{"review_status","limit"}`, bounded — never unlimited). The Opportunity Detail page has a **Bid Logistics** panel with an Extract Logistics button; the Review Queue shows deadline risk / submission method and can filter by deadline risk; the dashboard surfaces past-due, high-risk, and missing-deadline counts.
+API: `POST /opportunities/{id}/extract-logistics` and `POST /opportunities/extract-logistics` (optional `{"review_status","limit"}`, bounded - never unlimited). The Opportunity Detail page has a **Bid Logistics** panel with an Extract Logistics button; the Review Queue shows deadline risk / submission method and can filter by deadline risk; the dashboard surfaces past-due, high-risk, and missing-deadline counts.
 
 ## Logistics QA
 
@@ -226,7 +265,7 @@ QA flags missing due dates, past-due deadlines, due-within-3-days, passed Q&A de
 - `risk_level`: `Low`, `Medium`, `High`, or `Disqualifying`.
 - **Human verification is still required before bidding.**
 
-```powershell
+```cmd
 cd backend
 python -m app.cli logistics-qa 1
 python -m app.cli logistics-qa-by-status --status Pursue --limit 10
@@ -238,7 +277,7 @@ API: `POST /opportunities/{id}/logistics-qa` (runs + saves), `GET /opportunities
 
 The Operations Dashboard is the first page to check each day. It summarizes the review queue, upcoming deadlines (next 30 days), document status (pending download / downloaded / parsed / failed), requirement extraction status, a prioritized "Top Opportunities" list, a "Needs Action" list (what to do next per opportunity), and source health.
 
-```powershell
+```cmd
 cd backend
 python -m app.cli dashboard
 ```
@@ -250,13 +289,13 @@ API: `GET /dashboard/operations`. The frontend Dashboard page renders summary ca
 Scraped opportunities enter a human-controlled review workflow:
 
 - Newly scraped opportunities start as `New`.
-- Rules-based scoring helps prioritize but does **not** replace human review. A clearly negative/noise score suggests `Do Not Pursue`, and a promising score suggests `Needs Review` — but only for opportunities that have not yet been reviewed. Nothing is ever auto-archived or deleted.
+- Rules-based scoring helps prioritize but does **not** replace human review. A clearly negative/noise score suggests `Do Not Pursue`, and a promising score suggests `Needs Review` - but only for opportunities that have not yet been reviewed. Nothing is ever auto-archived or deleted.
 - Use `Pursue`, `Do Not Pursue`, `Watchlist`, and `Archived` to control workflow. Set priority (`High` / `Medium` / `Low`) and a next action.
 - Documents and AI actions (download, parse, AI evaluation, requirement extraction) should be run deliberately on promising opportunities, not in bulk on noise.
 
 CLI:
 
-```powershell
+```cmd
 cd backend
 python -m app.cli review-queue
 python -m app.cli review-queue --status New
@@ -276,11 +315,11 @@ The Review Queue controls which opportunities move forward. Once an opportunity 
 4. run local AI evaluation
 5. extract requirements
 
-Pursuit Prep is only run when you explicitly trigger it — it is never run automatically on every scraped opportunity. Each step's errors are captured and the run continues where it safely can; if the local AI is unavailable, that step records a clean error without failing the whole workflow. After a run, `next_action` is set to `Review Requirements`, `Manual Review`, or `Verify Portal` (when no documents were found). `review_status` is never changed by Pursuit Prep, and nothing is archived or deleted.
+Pursuit Prep is only run when you explicitly trigger it - it is never run automatically on every scraped opportunity. Each step's errors are captured and the run continues where it safely can; if the local AI is unavailable, that step records a clean error without failing the whole workflow. After a run, `next_action` is set to `Review Requirements`, `Manual Review`, or `Verify Portal` (when no documents were found). `review_status` is never changed by Pursuit Prep, and nothing is archived or deleted.
 
 Batch prep **requires a review status and a limit** (default 10) so public websites are not hammered; if more items match than the limit, a warning reports how many were skipped.
 
-```powershell
+```cmd
 cd backend
 python -m app.cli pursuit-prep 1
 python -m app.cli pursuit-prep 1 --steps discover_documents,download_documents,parse_documents

@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 from typing import Any
 
+from app.services.scrapers.keywords import (
+    AS_NEEDED_WARNING_KEYWORDS,
+    NEGATIVE_KEYWORDS,
+    PRIMARY_SECURITY_KEYWORDS,
+    SECONDARY_SECURITY_KEYWORDS,
+)
 
 SECURITY_TERMS = (
     "security",
@@ -25,14 +31,8 @@ SPECIALTY_SECURITY_TERMS = (
 PREFERRED_LOCATIONS = (" ca", "california", " tx", "texas", " nv", "nevada", " az", "arizona")
 LICENSE_TERMS = ("bsis", "ppo", "private patrol operator", "guard card")
 AS_NEEDED_TERMS = (
-    "as-needed",
-    "as needed",
-    "on-call",
-    "on call",
-    "standby",
-    "no guaranteed minimum",
+    *AS_NEEDED_WARNING_KEYWORDS,
     "no guarantee",
-    "indefinite quantity",
 )
 GUARANTEE_TERMS = (
     "guaranteed minimum",
@@ -60,11 +60,7 @@ HEAVY_PROPOSAL_TERMS = ("technical proposal", "management plan", "transition pla
 NON_SECURITY_TERMS = (
     "non-security",
     "non security",
-    "landscaping",
-    "janitorial",
-    "construction",
-    "paving",
-    "food service",
+    *NEGATIVE_KEYWORDS,
 )
 
 
@@ -76,8 +72,15 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
     verification_needed: list[str] = []
     disqualified = False
 
+    targeted_security_match = _has_any(
+        text, (*PRIMARY_SECURITY_KEYWORDS, *SECONDARY_SECURITY_KEYWORDS)
+    )
     non_security_match = _has_any(text, NON_SECURITY_TERMS)
-    security_match = _has_any(text, SECURITY_TERMS) and not non_security_match
+    security_match = (
+        _has_any(text, SECURITY_TERMS)
+        or targeted_security_match
+        or getattr(opportunity, "relevance_decision", None) in {"Relevant", "Maybe Relevant"}
+    ) and not (non_security_match and not targeted_security_match)
     if security_match:
         score += 30
         positive_factors.append("Security services match")
@@ -88,6 +91,15 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
     if _has_any(text, SPECIALTY_SECURITY_TERMS):
         score += 15
         positive_factors.append("Specific guard or facility security scope")
+
+    if targeted_security_match:
+        score += 20
+        positive_factors.append("Target security keyword match")
+
+    relevance_score = getattr(opportunity, "relevance_score", None)
+    if relevance_score is not None and relevance_score >= 40:
+        score += 10
+        positive_factors.append("Scraper relevance signal")
 
     if _location_matches(getattr(opportunity, "location", None)):
         score += 15
@@ -124,7 +136,9 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         score += 10
         positive_factors.append("Public agency or multi-site scope")
 
-    as_needed = _has_any(text, AS_NEEDED_TERMS)
+    as_needed = _has_any(text, AS_NEEDED_TERMS) or bool(
+        getattr(opportunity, "as_needed_warning", False)
+    )
     has_strategic_offset = (
         _has_any(text, GUARANTEE_TERMS)
         or _estimated_value(opportunity) >= 250000
@@ -134,6 +148,7 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         score -= 40
         negative_factors.append("As-needed/on-call scope has uncertain volume")
         if not has_strategic_offset:
+            score -= 20
             verification_needed.append("Confirm guaranteed minimum, likely usage, or low response burden")
 
     if getattr(opportunity, "pre_bid_mandatory", False):
@@ -202,6 +217,12 @@ def _opportunity_text(opportunity: Any) -> str:
         "service_type",
         "contract_type",
         "status",
+        "description",
+        "notes",
+        "relevance_decision",
+        "relevance_reason",
+        "keyword_matches_json",
+        "negative_matches_json",
     )
     values = [str(getattr(opportunity, field, "") or "") for field in fields]
     return " ".join(values).lower()

@@ -50,6 +50,12 @@ def scrape_enabled_sources() -> dict:
         "candidates_found": 0,
         "candidates_kept": 0,
         "candidates_filtered": 0,
+        "candidates_filtered_quality": 0,
+        "candidates_filtered_relevance": 0,
+        "relevant": 0,
+        "maybe_relevant": 0,
+        "not_relevant": 0,
+        "as_needed_warning_count": 0,
         "created_count": 0,
         "updated_count": 0,
         "skipped_duplicates": 0,
@@ -71,6 +77,12 @@ def scrape_enabled_sources() -> dict:
         summary["candidates_found"] += result.get("total_candidates_found", 0)
         summary["candidates_kept"] += result.get("candidates_kept", 0)
         summary["candidates_filtered"] += result.get("candidates_filtered", 0)
+        summary["candidates_filtered_quality"] += result.get("candidates_filtered_quality", 0)
+        summary["candidates_filtered_relevance"] += result.get("candidates_filtered_relevance", 0)
+        summary["relevant"] += result.get("relevant", 0)
+        summary["maybe_relevant"] += result.get("maybe_relevant", 0)
+        summary["not_relevant"] += result.get("not_relevant", 0)
+        summary["as_needed_warning_count"] += result.get("as_needed_warning_count", 0)
         summary["created_count"] += result["created_count"]
         summary["updated_count"] += result["updated_count"]
         summary["skipped_duplicates"] += result["skipped_duplicates"]
@@ -197,7 +209,10 @@ def _run_scrape_for_source(source: SourceConfig) -> dict:
 
 def _scrape_summary(result: dict) -> str:
     return (
-        f"{result['records_found']} candidates, "
+        f"{result.get('total_candidates_found', result['records_found'])} found, "
+        f"{result.get('candidates_filtered_quality', 0)} quality filtered, "
+        f"{result.get('candidates_filtered_relevance', 0)} relevance filtered, "
+        f"{result['records_found']} kept, "
         f"{result['created_count']} created, "
         f"{result['updated_count']} updated, "
         f"{result['skipped_duplicates']} skipped duplicates, "

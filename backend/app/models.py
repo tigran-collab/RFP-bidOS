@@ -47,6 +47,12 @@ class Opportunity(SQLModel, table=True):
     deadline_risk: str | None = None
     logistics_confidence_score: float | None = None
     logistics_notes: str | None = None
+    relevance_score: int | None = None
+    relevance_decision: str | None = None
+    keyword_matches_json: str | None = None
+    negative_matches_json: str | None = None
+    as_needed_warning: bool = False
+    relevance_reason: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

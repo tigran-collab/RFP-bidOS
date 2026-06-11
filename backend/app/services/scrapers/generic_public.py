@@ -21,6 +21,10 @@ from app.services.scrapers.extraction_utils import (
     normalize_space,
     visible_text_from_html,
 )
+from app.services.scrapers.keywords import (
+    PRIMARY_SECURITY_KEYWORDS,
+    SECONDARY_SECURITY_KEYWORDS,
+)
 from app.services.scrapers.source_classifier import classify_source
 from app.services.scrapers.table_parser import parse_tables
 
@@ -41,6 +45,8 @@ BID_KEYWORDS = (
     "patrol",
     "armed",
     "unarmed",
+    *PRIMARY_SECURITY_KEYWORDS,
+    *SECONDARY_SECURITY_KEYWORDS,
 )
 
 

@@ -128,7 +128,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         : "";
       setMessage(
         `Opportunity ${id} pursuit prep (${result.final_status}): ` +
-          `${parts.join(", ")} → next: ${result.next_action}${errSuffix}`,
+          `${parts.join(", ")} -> next: ${result.next_action}${errSuffix}`,
       );
       setError(result.errors?.length ? result.errors.join("; ") : "");
       await loadQueue();
@@ -272,6 +272,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
               <th>QA</th>
               <th>Submission</th>
               <th>Bid Score</th>
+              <th>Relevance</th>
               <th>AI Rec</th>
               <th>Review</th>
               <th>Priority</th>
@@ -309,6 +310,15 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                 </td>
                 <td>{opp.submission_method || ""}</td>
                 <td>{opp.bid_score ?? ""}</td>
+                <td>
+                  {opp.relevance_decision || ""}
+                  {opp.relevance_score !== null && opp.relevance_score !== undefined
+                    ? ` (${opp.relevance_score})`
+                    : ""}
+                  {opp.as_needed_warning ? (
+                    <div className="notice-text">As-needed caution</div>
+                  ) : null}
+                </td>
                 <td>{opp.ai_recommendation || ""}</td>
                 <td>
                   <StatusBadge status={opp.review_status || "New"} />
