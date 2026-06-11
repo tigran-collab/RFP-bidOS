@@ -170,6 +170,23 @@ Notes:
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Bid Logistics
+
+The app extracts critical bid logistics — proposal due date, Q&A deadline, pre-bid meeting date and whether it is mandatory, submission method/portal, required forms, and deadline risk — from parsed document text and opportunity metadata using deterministic regex/heuristics (no AI required, no network).
+
+- Extraction is heuristic and **requires human verification**.
+- Deadline risk: `Past Due`, `High` (≤3 days), `Medium` (≤7 days), `Low` (>7 days), `Missing Deadline` (no date found), or `Needs Review` (conflicting dates).
+- Conflicting or ambiguous deadlines are recorded in `logistics_notes`, confidence is lowered, and risk is marked `Needs Review`.
+
+```powershell
+cd backend
+python -m app.cli extract-logistics 1
+python -m app.cli extract-logistics-by-status --status Pursue --limit 10
+python -m app.cli extract-logistics-all --limit 25
+```
+
+API: `POST /opportunities/{id}/extract-logistics` and `POST /opportunities/extract-logistics` (optional `{"review_status","limit"}`, bounded — never unlimited). The Opportunity Detail page has a **Bid Logistics** panel with an Extract Logistics button; the Review Queue shows deadline risk / submission method and can filter by deadline risk; the dashboard surfaces past-due, high-risk, and missing-deadline counts.
+
 ## Operations Dashboard
 
 The Operations Dashboard is the first page to check each day. It summarizes the review queue, upcoming deadlines (next 30 days), document status (pending download / downloaded / parsed / failed), requirement extraction status, a prioritized "Top Opportunities" list, a "Needs Action" list (what to do next per opportunity), and source health.

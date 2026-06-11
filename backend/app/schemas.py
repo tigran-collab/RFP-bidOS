@@ -37,6 +37,12 @@ class OpportunityCreate(BaseModel):
     reviewed_by: str | None = None
     priority: str | None = None
     next_action: str | None = None
+    submission_method: str | None = None
+    submission_portal: str | None = None
+    required_forms_summary: str | None = None
+    deadline_risk: str | None = None
+    logistics_confidence_score: float | None = None
+    logistics_notes: str | None = None
 
 
 REVIEW_STATUS_CHOICES = {
@@ -98,6 +104,13 @@ class PursuitPrepByStatusRequest(BaseModel):
     steps: list[str] | None = None
 
 
+class ExtractLogisticsByStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_status: str | None = None
+    limit: int = 10
+
+
 class OpportunityUpdate(BaseModel):
     title: str | None = None
     agency: str | None = None
@@ -127,6 +140,12 @@ class OpportunityUpdate(BaseModel):
     priority: str | None = None
     next_action: str | None = None
     reviewed_by: str | None = None
+    submission_method: str | None = None
+    submission_portal: str | None = None
+    required_forms_summary: str | None = None
+    deadline_risk: str | None = None
+    logistics_confidence_score: float | None = None
+    logistics_notes: str | None = None
 
 
 class OpportunityRead(OpportunityCreate):

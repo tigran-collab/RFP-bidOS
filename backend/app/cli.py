@@ -21,6 +21,11 @@ from app.services.scraper import (
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.dashboard import get_operations_dashboard
+from app.services.logistics_extractor import (
+    apply_logistics_all,
+    apply_logistics_for_status,
+    apply_logistics_to_opportunity,
+)
 from app.services.pursuit_workflow import (
     run_pursuit_prep,
     run_pursuit_prep_for_status,
@@ -221,6 +226,68 @@ def score_all_opportunities() -> None:
         session.commit()
 
 
+def _echo_logistics(result: dict) -> None:
+    if result.get("error"):
+        typer.echo(result["error"])
+        return
+    typer.echo(f"[{result['opportunity_id']}] {result.get('title') or '-'}")
+    typer.echo(f"  due date: {result.get('due_date') or '-'}")
+    typer.echo(f"  Q&A deadline: {result.get('q_and_a_deadline') or '-'}")
+    typer.echo(f"  pre-bid date: {result.get('pre_bid_date') or '-'}")
+    typer.echo(f"  pre-bid mandatory: {result.get('pre_bid_mandatory')}")
+    typer.echo(f"  submission method: {result.get('submission_method') or '-'}")
+    typer.echo(f"  submission portal: {result.get('submission_portal') or '-'}")
+    typer.echo(f"  required forms: {result.get('required_forms_summary') or '-'}")
+    typer.echo(f"  deadline risk: {result.get('deadline_risk') or '-'}")
+    typer.echo(f"  confidence: {result.get('logistics_confidence_score')}")
+    if result.get("logistics_notes"):
+        typer.echo(f"  notes: {result['logistics_notes']}")
+
+
+@cli.command("extract-logistics")
+def extract_logistics_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        result = apply_logistics_to_opportunity(opportunity_id, session)
+    _echo_logistics(result)
+
+
+@cli.command("extract-logistics-by-status")
+def extract_logistics_by_status_command(
+    status: str = typer.Option(..., "--status", help="Review status, e.g. Pursue"),
+    limit: int = typer.Option(10, "--limit", help="Max opportunities to process"),
+) -> None:
+    with Session(engine) as session:
+        batch = apply_logistics_for_status(status, session, limit=limit)
+    typer.echo(
+        f"{batch['label']}: {batch['matched_count']} matched, "
+        f"{batch['processed_count']} processed (limit {batch['limit']})"
+    )
+    if batch.get("warning"):
+        typer.echo(f"WARNING: {batch['warning']}")
+    for result in batch["results"]:
+        _echo_logistics(result)
+
+
+@cli.command("extract-logistics-all")
+def extract_logistics_all_command(
+    limit: int = typer.Option(25, "--limit", help="Max opportunities to process"),
+) -> None:
+    with Session(engine) as session:
+        batch = apply_logistics_all(session, limit=limit)
+    typer.echo(
+        f"{batch['label']}: {batch['matched_count']} matched, "
+        f"{batch['processed_count']} processed (limit {batch['limit']})"
+    )
+    if batch.get("warning"):
+        typer.echo(f"WARNING: {batch['warning']}")
+    for result in batch["results"]:
+        _echo_logistics(result)
+
+
 @cli.command("dashboard")
 def dashboard_command() -> None:
     """Print a concise operations dashboard."""
@@ -245,6 +312,11 @@ def dashboard_command() -> None:
     typer.echo(
         f"  sources: enabled={counts['sources_enabled']} | "
         f"requiring_credentials={counts['sources_requiring_credentials']}"
+    )
+    typer.echo(
+        f"  deadlines: high_risk={counts['deadline_risk_high']} | "
+        f"past_due={counts['deadline_past_due']} | "
+        f"missing={counts['deadline_missing']}"
     )
 
     typer.echo("\n== Upcoming Deadlines (next 30 days) ==")

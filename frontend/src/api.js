@@ -60,6 +60,10 @@ export function runPursuitPrep(id, steps) {
   return jsonRequest(`/opportunities/${id}/pursuit-prep`, body, "POST");
 }
 
+export function extractOpportunityLogistics(id) {
+  return request(`/opportunities/${id}/extract-logistics`, { method: "POST" });
+}
+
 export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }

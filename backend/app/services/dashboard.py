@@ -80,6 +80,11 @@ def get_operations_dashboard(session) -> dict:
         "sources_requiring_credentials": sum(
             1 for s in sources if s.requires_credentials
         ),
+        "deadline_risk_high": sum(1 for o in opportunities if o.deadline_risk == "High"),
+        "deadline_past_due": sum(1 for o in opportunities if o.deadline_risk == "Past Due"),
+        "deadline_missing": sum(
+            1 for o in opportunities if o.deadline_risk == "Missing Deadline"
+        ),
     }
 
     upcoming_deadlines = _upcoming_deadlines(opportunities, now)
@@ -111,6 +116,8 @@ def _opp_brief(opp: Opportunity) -> dict:
         "ai_recommendation": opp.ai_recommendation,
         "ai_score": opp.ai_score,
         "next_action": opp.next_action,
+        "deadline_risk": opp.deadline_risk,
+        "submission_method": opp.submission_method,
     }
 
 
@@ -170,7 +177,29 @@ def _needs_action(
         reason = None
         suggested_action = None
 
-        if pending:
+        # Deadline/logistics signals are the most urgent.
+        active = status in {"Pursue", "Watchlist"}
+        pre_bid_soon = (
+            opp.pre_bid_mandatory
+            and opp.pre_bid_date
+            and 0 <= _days_until(opp.pre_bid_date, now) <= 7
+        )
+        if opp.deadline_risk == "Past Due":
+            reason = "Due date is past due"
+            suggested_action = "Verify Portal"
+        elif opp.deadline_risk == "Missing Deadline" and active:
+            reason = "No due date found"
+            suggested_action = "Verify Portal"
+        elif opp.deadline_risk == "High":
+            reason = "Due date within 3 days (high deadline risk)"
+            suggested_action = "Manual Review"
+        elif pre_bid_soon:
+            reason = "Mandatory pre-bid meeting within 7 days"
+            suggested_action = "Verify Portal"
+        elif active and not opp.submission_method:
+            reason = "No submission method identified"
+            suggested_action = "Extract Logistics"
+        elif pending:
             reason = f"{len(pending)} document(s) discovered but not downloaded"
             suggested_action = "Download Documents"
         elif downloaded and not parsed:

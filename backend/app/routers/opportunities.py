@@ -10,6 +10,7 @@ from app.schemas import (
     OpportunityCreate,
     OpportunityEvaluationRead,
     OpportunityRead,
+    ExtractLogisticsByStatusRequest,
     OpportunityReviewUpdate,
     OpportunityUpdate,
     PursuitPrepByStatusRequest,
@@ -28,6 +29,11 @@ from app.services.requirement_extractor import (
     NO_PARSED_TEXT,
     extract_requirements_with_local_ai,
     refresh_requirements_with_local_ai,
+)
+from app.services.logistics_extractor import (
+    apply_logistics_all,
+    apply_logistics_for_status,
+    apply_logistics_to_opportunity,
 )
 from app.services.pursuit_workflow import (
     run_pursuit_prep,
@@ -69,6 +75,7 @@ def review_queue(
     max_score: float | None = Query(default=None),
     service_type: str | None = Query(default=None),
     source_id: int | None = Query(default=None),
+    deadline_risk: str | None = Query(default=None),
 ) -> list[Opportunity]:
     with Session(engine) as session:
         opportunities = list(session.exec(select(Opportunity)).all())
@@ -81,6 +88,8 @@ def review_queue(
         if status and (opp.review_status or "New") != status:
             return False
         if priority and (opp.priority or "") != priority:
+            return False
+        if deadline_risk and (opp.deadline_risk or "") != deadline_risk:
             return False
         if service_type and service_type.lower() not in (opp.service_type or "").lower():
             return False
@@ -107,6 +116,16 @@ def pursuit_prep_by_status(payload: PursuitPrepByStatusRequest) -> dict:
         return run_pursuit_prep_for_status(
             payload.status, session, steps=payload.steps, limit=payload.limit
         )
+
+
+@router.post("/extract-logistics")
+def extract_logistics_batch(payload: ExtractLogisticsByStatusRequest | None = None) -> dict:
+    review_status = payload.review_status if payload else None
+    limit = payload.limit if payload else 10
+    with Session(engine) as session:
+        if review_status:
+            return apply_logistics_for_status(review_status, session, limit=limit)
+        return apply_logistics_all(session, limit=limit)
 
 
 def _review_sort_key(opp: Opportunity) -> tuple:
@@ -171,6 +190,15 @@ def review_opportunity(opportunity_id: int, payload: OpportunityReviewUpdate) ->
         session.commit()
         session.refresh(opportunity)
         return opportunity
+
+
+@router.post("/{opportunity_id}/extract-logistics")
+def extract_logistics_one(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        result = apply_logistics_to_opportunity(opportunity_id, session)
+        if result.get("error"):
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
 
 
 @router.post("/{opportunity_id}/pursuit-prep")

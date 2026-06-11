@@ -88,6 +88,7 @@ export default function Dashboard({ onOpenOpportunity }) {
               <th>Title</th>
               <th>Agency</th>
               <th>Due</th>
+              <th>Deadline Risk</th>
               <th>Review</th>
               <th>Bid Score</th>
               <th>AI Rec</th>
@@ -108,6 +109,7 @@ export default function Dashboard({ onOpenOpportunity }) {
                 </td>
                 <td>{item.agency || ""}</td>
                 <td>{formatDate(item.due_date)}</td>
+                <td>{item.deadline_risk || ""}</td>
                 <td>
                   <StatusBadge status={item.review_status} />
                 </td>

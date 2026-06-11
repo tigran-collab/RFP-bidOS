@@ -39,6 +39,12 @@ class Opportunity(SQLModel, table=True):
     reviewed_by: str | None = None
     priority: str | None = None
     next_action: str | None = None
+    submission_method: str | None = None
+    submission_portal: str | None = None
+    required_forms_summary: str | None = None
+    deadline_risk: str | None = None
+    logistics_confidence_score: float | None = None
+    logistics_notes: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

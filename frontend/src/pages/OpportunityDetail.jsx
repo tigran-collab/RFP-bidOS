@@ -4,6 +4,7 @@ import {
   aiEvaluateOpportunity,
   discoverOpportunityDocuments,
   downloadOpportunityDocuments,
+  extractOpportunityLogistics,
   extractOpportunityRequirements,
   getOpportunity,
   getOpportunityDocuments,
@@ -83,6 +84,7 @@ export default function OpportunityDetail({ opportunityId }) {
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [extractingLogistics, setExtractingLogistics] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -162,6 +164,24 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to run pursuit prep. Is the backend running?");
     } finally {
       setPreparing(false);
+    }
+  }
+
+  async function runExtractLogistics() {
+    try {
+      setExtractingLogistics(true);
+      const result = await extractOpportunityLogistics(opportunityId);
+      setOpportunity(await getOpportunity(opportunityId));
+      setActionMessage(
+        `Logistics extracted: deadline risk ${result.deadline_risk}, ` +
+          `confidence ${result.logistics_confidence_score ?? "-"}` +
+          (result.has_parsed_text ? "" : " (no parsed text — metadata only)"),
+      );
+      setActionError("");
+    } catch {
+      setActionError("Failed to extract logistics. Is the backend running?");
+    } finally {
+      setExtractingLogistics(false);
     }
   }
 
@@ -270,7 +290,8 @@ export default function OpportunityDetail({ opportunityId }) {
     downloading ||
     parsing ||
     aiEvaluating ||
-    extracting;
+    extracting ||
+    extractingLogistics;
 
   return (
     <section>
@@ -291,6 +312,14 @@ export default function OpportunityDetail({ opportunityId }) {
           onClick={runScore}
         >
           {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runExtractLogistics}
+        >
+          {extractingLogistics ? "Extracting Logistics..." : "Extract Logistics"}
         </button>
         <button
           className="primary-button"
@@ -388,6 +417,28 @@ export default function OpportunityDetail({ opportunityId }) {
         <DetailRow label="AI reason" value={opportunity.ai_reason} />
         <DetailRow label="AI risk level" value={opportunity.ai_risk_level} />
         <DetailRow label="Status" value={opportunity.status} />
+      </dl>
+      <h2>Bid Logistics</h2>
+      <dl className="detail-grid">
+        <DetailRow label="Due date" value={formatDate(opportunity.due_date)} />
+        <DetailRow label="Q&A deadline" value={formatDate(opportunity.q_and_a_deadline)} />
+        <DetailRow label="Pre-bid date" value={formatDate(opportunity.pre_bid_date)} />
+        <DetailRow
+          label="Pre-bid mandatory"
+          value={opportunity.pre_bid_mandatory ? "Yes" : "No"}
+        />
+        <DetailRow label="Submission method" value={opportunity.submission_method} />
+        <DetailRow label="Submission portal" value={opportunity.submission_portal} />
+        <DetailRow
+          label="Required forms"
+          value={opportunity.required_forms_summary}
+        />
+        <DetailRow label="Deadline risk" value={opportunity.deadline_risk} />
+        <DetailRow
+          label="Logistics confidence"
+          value={opportunity.logistics_confidence_score}
+        />
+        <DetailRow label="Logistics notes" value={opportunity.logistics_notes} />
       </dl>
       <h2>Local AI Evaluation</h2>
       {!latestEvaluation ? (
