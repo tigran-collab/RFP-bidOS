@@ -119,6 +119,7 @@ class SourceConfigCreate(BaseModel):
     credential_secret_ref: str | None = None
     credential_notes: str | None = None
     auth_status: str | None = "Not Configured"
+    portal_type: str | None = None
 
     @field_validator("credential_type")
     @classmethod
@@ -143,6 +144,25 @@ class SourceConfigCreate(BaseModel):
                 "Unsupported This Phase",
             },
             "auth_status",
+        )
+
+    @field_validator("portal_type")
+    @classmethod
+    def validate_portal_type(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {
+                None,
+                "Generic Public",
+                "BidNet",
+                "PlanetBids",
+                "SAM.gov",
+                "Bonfire",
+                "OpenGov",
+                "DemandStar",
+                "Other",
+            },
+            "portal_type",
         )
 
 
@@ -161,6 +181,7 @@ class SourceConfigUpdate(BaseModel):
     credential_secret_ref: str | None = None
     credential_notes: str | None = None
     auth_status: str | None = None
+    portal_type: str | None = None
 
     @field_validator("credential_type")
     @classmethod
@@ -185,6 +206,25 @@ class SourceConfigUpdate(BaseModel):
                 "Unsupported This Phase",
             },
             "auth_status",
+        )
+
+    @field_validator("portal_type")
+    @classmethod
+    def validate_portal_type(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {
+                None,
+                "Generic Public",
+                "BidNet",
+                "PlanetBids",
+                "SAM.gov",
+                "Bonfire",
+                "OpenGov",
+                "DemandStar",
+                "Other",
+            },
+            "portal_type",
         )
 
 

@@ -14,6 +14,7 @@ from app.services.parser import (
 )
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import preview_source, scrape_source
+from app.services.scrapers.bidnet_placeholder import get_scraper_capabilities
 from app.services.scorer import score_opportunity_text
 from app.services.source_credentials import update_source_auth_status
 
@@ -114,6 +115,7 @@ def seed_demo() -> None:
                 "BidNet credentials will be added in a future authenticated-source phase."
             ),
             auth_status="Unsupported This Phase",
+            portal_type="BidNet",
             notes="Authenticated BidNet scraping is intentionally not implemented yet.",
         ),
     ]
@@ -142,6 +144,7 @@ def seed_demo() -> None:
                 existing.credential_secret_ref = source.credential_secret_ref
                 existing.credential_notes = source.credential_notes
                 existing.auth_status = source.auth_status
+                existing.portal_type = source.portal_type
                 session.add(existing)
         session.commit()
 
@@ -261,6 +264,27 @@ def check_all_source_auth_command() -> None:
         for source in sources:
             result = update_source_auth_status(source.id, session)
             _echo_auth_status(result)
+
+
+@cli.command("source-capabilities")
+def source_capabilities_command(source_id: int) -> None:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+    _echo_capabilities(get_scraper_capabilities(source))
+
+
+@cli.command("all-source-capabilities")
+def all_source_capabilities_command() -> None:
+    with Session(engine) as session:
+        sources = list(session.exec(select(SourceConfig)).all())
+    if not sources:
+        typer.echo("No sources found")
+        return
+    for source in sources:
+        _echo_capabilities(get_scraper_capabilities(source))
 
 
 @cli.command("download-documents")
@@ -483,6 +507,18 @@ def _scrape_summary(result: dict) -> str:
         f"{result['skipped_duplicates']} skipped duplicates, "
         f"{len(result['errors'])} errors"
     )
+
+
+def _echo_capabilities(caps: dict) -> None:
+    typer.echo(
+        f"{caps['source_name']}: portal={caps['portal_type'] or 'Unknown'}, "
+        f"public scraping={'yes' if caps['public_scraping_available'] else 'no'}, "
+        f"authenticated scraping={'yes' if caps['authenticated_scraping_available'] else 'not enabled'}"
+    )
+    if caps.get("authenticated_scraping_notice"):
+        typer.echo(f"  Notice: {caps['authenticated_scraping_notice']}")
+    if caps.get("auth_missing_fields"):
+        typer.echo(f"  Missing: {', '.join(caps['auth_missing_fields'])}")
 
 
 if __name__ == "__main__":

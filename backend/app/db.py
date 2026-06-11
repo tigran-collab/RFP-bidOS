@@ -96,6 +96,7 @@ def _ensure_source_scraper_columns() -> None:
         "last_scrape_at": "DATETIME",
         "last_scrape_status": "VARCHAR",
         "last_scrape_summary": "VARCHAR",
+        "portal_type": "VARCHAR",
     }
     with Session(engine) as session:
         existing_columns = {

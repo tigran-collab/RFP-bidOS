@@ -169,6 +169,14 @@ h2 {
   font-size: 0.85rem;
 }
 
+.notice-text {
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  padding: 4px 8px;
+  border-radius: 2px;
+  margin-top: 4px;
+}
+
 .break-text {
   overflow-wrap: anywhere;
 }

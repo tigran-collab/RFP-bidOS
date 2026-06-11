@@ -11,6 +11,20 @@ import {
 
 const errorMessage = "Failed to load source data. Is the backend running?";
 
+const PORTAL_TYPES = [
+  "",
+  "Generic Public",
+  "BidNet",
+  "PlanetBids",
+  "SAM.gov",
+  "Bonfire",
+  "OpenGov",
+  "DemandStar",
+  "Other",
+];
+
+const AUTHENTICATED_PORTALS = new Set(["BidNet", "PlanetBids", "Bonfire", "OpenGov", "DemandStar"]);
+
 function formatResult(result) {
   if (!result) {
     return "";
@@ -41,6 +55,39 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
+function CapabilitiesNotice({ source, edit }) {
+  const portalType = edit.portal_type || source.portal_type || "";
+  const requiresCreds = Boolean(edit.requires_credentials);
+
+  if (portalType === "BidNet") {
+    return (
+      <p className="muted-text notice-text">
+        BidNet credentials can be configured here for future authenticated access.
+        Authenticated BidNet scraping is not enabled in this phase.
+      </p>
+    );
+  }
+
+  if (requiresCreds && AUTHENTICATED_PORTALS.has(portalType)) {
+    return (
+      <p className="muted-text notice-text">
+        {portalType} is configured as a credentialed source.
+        Authenticated scraping is not enabled in this phase.
+      </p>
+    );
+  }
+
+  if (requiresCreds) {
+    return (
+      <p className="muted-text notice-text">
+        This source requires credentials. Authenticated scraping is not enabled in this phase.
+      </p>
+    );
+  }
+
+  return null;
+}
+
 export default function Scraper() {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +116,7 @@ export default function Scraper() {
               credential_username: source.credential_username || "",
               credential_secret_ref: source.credential_secret_ref || "",
               credential_notes: source.credential_notes || "",
+              portal_type: source.portal_type || "",
             },
           ]),
         ),
@@ -138,7 +186,11 @@ export default function Scraper() {
   async function saveSourceCredentials(source) {
     try {
       setSavingSource(String(source.id));
-      await updateSource(source.id, sourceEdits[source.id]);
+      const edit = sourceEdits[source.id] || {};
+      await updateSource(source.id, {
+        ...edit,
+        portal_type: edit.portal_type || null,
+      });
       await loadSources();
       setMessage(`${source.name}: credential settings saved`);
       setError("");
@@ -203,14 +255,13 @@ export default function Scraper() {
             {sources.map((source) => {
               const edit = sourceEdits[source.id] || {};
               const authResult = authResults[source.id];
-              const isBidNet = `${source.name} ${source.base_url || ""}`
-                .toLowerCase()
-                .includes("bidnet");
+              const displayPortal = edit.portal_type || source.portal_type || "Generic Public";
               return (
               <tr key={source.id}>
                 <td>
                   <strong>{source.name}</strong>
                   <div className="muted-text">{source.source_type}</div>
+                  <div className="muted-text">Portal: {displayPortal}</div>
                 </td>
                 <td className="break-text">{source.base_url || ""}</td>
                 <td>{source.enabled ? "Yes" : "No"}</td>
@@ -243,17 +294,33 @@ export default function Scraper() {
                       />
                       Requires Credentials
                     </label>
-                    <select
-                      value={edit.credential_type || ""}
-                      onChange={(event) =>
-                        updateSourceEdit(source.id, "credential_type", event.target.value)
-                      }
-                    >
-                      <option value="">None</option>
-                      <option value="Manual">Manual</option>
-                      <option value="Environment">Environment</option>
-                      <option value="Future Secret Store">Future Secret Store</option>
-                    </select>
+                    <label>
+                      Portal Type
+                      <select
+                        value={edit.portal_type || ""}
+                        onChange={(event) =>
+                          updateSourceEdit(source.id, "portal_type", event.target.value)
+                        }
+                      >
+                        {PORTAL_TYPES.map((pt) => (
+                          <option key={pt} value={pt}>{pt || "— Select —"}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Credential Type
+                      <select
+                        value={edit.credential_type || ""}
+                        onChange={(event) =>
+                          updateSourceEdit(source.id, "credential_type", event.target.value)
+                        }
+                      >
+                        <option value="">None</option>
+                        <option value="Manual">Manual</option>
+                        <option value="Environment">Environment</option>
+                        <option value="Future Secret Store">Future Secret Store</option>
+                      </select>
+                    </label>
                     <input
                       type="text"
                       value={edit.credential_username || ""}
@@ -278,12 +345,7 @@ export default function Scraper() {
                         updateSourceEdit(source.id, "credential_notes", event.target.value)
                       }
                     />
-                    {isBidNet ? (
-                      <p className="muted-text">
-                        BidNet credentials can be configured for future authenticated access.
-                        Authenticated scraping is not enabled in this phase.
-                      </p>
-                    ) : null}
+                    <CapabilitiesNotice source={source} edit={edit} />
                     {authResult?.missing_fields?.length ? (
                       <p className="error-text">{authResult.missing_fields.join("; ")}</p>
                     ) : null}
