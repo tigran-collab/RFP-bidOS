@@ -24,6 +24,12 @@ from app.services.scraper import (
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.dashboard import get_operations_dashboard
+from app.services.exports import (
+    export_documents_csv,
+    export_logistics_qa_csv,
+    export_opportunities_csv,
+    export_requirements_csv,
+)
 from app.services.logistics_extractor import (
     apply_logistics_all,
     apply_logistics_for_status,
@@ -519,6 +525,58 @@ def logistics_qa_by_status_command(
         typer.echo(f"WARNING: {batch['warning']}")
     for result in batch["results"]:
         _echo_logistics_qa(result)
+
+
+def _write_export(content: str, output: str) -> None:
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="")
+    # Row count excludes the header line.
+    row_count = max(0, content.count("\n") - 1) if content else 0
+    typer.echo(f"Wrote {row_count} row(s) to {path}")
+
+
+@cli.command("export-opportunities")
+def export_opportunities_command(
+    output: str = typer.Option("exports/opportunities.csv", "--output"),
+    review_status: str = typer.Option(None, "--review-status"),
+    priority: str = typer.Option(None, "--priority"),
+) -> None:
+    with Session(engine) as session:
+        content = export_opportunities_csv(
+            session, filters={"review_status": review_status, "priority": priority}
+        )
+    _write_export(content, output)
+
+
+@cli.command("export-requirements")
+def export_requirements_command(
+    output: str = typer.Option("exports/requirements.csv", "--output"),
+    opportunity_id: int = typer.Option(None, "--opportunity-id"),
+) -> None:
+    with Session(engine) as session:
+        content = export_requirements_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, output)
+
+
+@cli.command("export-documents")
+def export_documents_command(
+    output: str = typer.Option("exports/documents.csv", "--output"),
+    opportunity_id: int = typer.Option(None, "--opportunity-id"),
+) -> None:
+    with Session(engine) as session:
+        content = export_documents_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, output)
+
+
+@cli.command("export-logistics-qa")
+def export_logistics_qa_command(
+    output: str = typer.Option("exports/logistics_qa.csv", "--output"),
+    opportunity_id: int = typer.Option(None, "--opportunity-id"),
+) -> None:
+    with Session(engine) as session:
+        content = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, output)
 
 
 @cli.command("dashboard")

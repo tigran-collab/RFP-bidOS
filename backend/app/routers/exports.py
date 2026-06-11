@@ -1,0 +1,54 @@
+from fastapi import APIRouter, Query
+from fastapi.responses import Response
+from sqlmodel import Session
+
+from app.db import engine
+from app.services.exports import (
+    export_documents_csv,
+    export_logistics_qa_csv,
+    export_opportunities_csv,
+    export_requirements_csv,
+)
+
+router = APIRouter(prefix="/exports", tags=["exports"])
+
+
+def _csv_response(content: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/opportunities.csv")
+def export_opportunities(
+    review_status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+) -> Response:
+    with Session(engine) as session:
+        content = export_opportunities_csv(
+            session, filters={"review_status": review_status, "priority": priority}
+        )
+    return _csv_response(content, "opportunities.csv")
+
+
+@router.get("/requirements.csv")
+def export_requirements(opportunity_id: int | None = Query(default=None)) -> Response:
+    with Session(engine) as session:
+        content = export_requirements_csv(session, opportunity_id=opportunity_id)
+    return _csv_response(content, "requirements.csv")
+
+
+@router.get("/documents.csv")
+def export_documents(opportunity_id: int | None = Query(default=None)) -> Response:
+    with Session(engine) as session:
+        content = export_documents_csv(session, opportunity_id=opportunity_id)
+    return _csv_response(content, "documents.csv")
+
+
+@router.get("/logistics-qa.csv")
+def export_logistics_qa(opportunity_id: int | None = Query(default=None)) -> Response:
+    with Session(engine) as session:
+        content = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
+    return _csv_response(content, "logistics_qa.csv")

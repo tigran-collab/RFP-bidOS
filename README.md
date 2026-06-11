@@ -170,6 +170,20 @@ Notes:
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Exports
+
+CSV exports are available for opportunities, requirements, documents, and logistics QA. They are intended for review, sharing, backup, and proposal planning. **No proposal PDFs are generated in this phase.**
+
+```powershell
+cd backend
+python -m app.cli export-opportunities --output exports/opportunities.csv
+python -m app.cli export-requirements --output exports/requirements.csv
+python -m app.cli export-documents --output exports/documents.csv
+python -m app.cli export-logistics-qa --output exports/logistics_qa.csv
+```
+
+The CLI creates the `exports/` directory if missing and prints the row count. API endpoints return `text/csv` downloads: `GET /exports/opportunities.csv` (optional `review_status`, `priority`), `GET /exports/requirements.csv`, `GET /exports/documents.csv`, `GET /exports/logistics-qa.csv` (each optional `opportunity_id`). The Dashboard has one-click export buttons.
+
 ## Manual Opportunity Entry
 
 Use manual entry for BidNet, PlanetBids, emails, PDFs, screenshots, and portals that do not scrape cleanly. Manually created opportunities default to `source = "Manual"` and `review_status = "New"`, and appear in the dashboard and review queue alongside scraped ones.

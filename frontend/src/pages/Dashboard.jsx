@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 
-import { getHealth, getOperationsDashboard } from "../api.js";
+import { API_BASE_URL, getHealth, getOperationsDashboard } from "../api.js";
 import StatusBadge from "../components/StatusBadge.jsx";
+
+const EXPORTS = [
+  { label: "Export Opportunities CSV", path: "/exports/opportunities.csv" },
+  { label: "Export Requirements CSV", path: "/exports/requirements.csv" },
+  { label: "Export Documents CSV", path: "/exports/documents.csv" },
+  { label: "Export Logistics QA CSV", path: "/exports/logistics-qa.csv" },
+];
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
 
@@ -75,6 +82,19 @@ export default function Dashboard({ onOpenOpportunity }) {
             <span>{card.label}</span>
             <strong>{counts[card.key] ?? 0}</strong>
           </div>
+        ))}
+      </div>
+
+      <h2>Exports</h2>
+      <div className="export-buttons">
+        {EXPORTS.map((item) => (
+          <a
+            key={item.path}
+            className="secondary-button"
+            href={`${API_BASE_URL}${item.path}`}
+          >
+            {item.label}
+          </a>
         ))}
       </div>
 

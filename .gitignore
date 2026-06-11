@@ -15,3 +15,5 @@ frontend/node_modules/
 .DS_Store
 prompt_*.txt
 context.txt
+exports/
+backend/exports/

@@ -5,6 +5,7 @@ from app.routers import (
     analysis,
     dashboard,
     documents,
+    exports,
     opportunities,
     scraper,
     sources,
@@ -26,6 +27,7 @@ app.include_router(scraper.router)
 app.include_router(analysis.router)
 app.include_router(sources.router)
 app.include_router(dashboard.router)
+app.include_router(exports.router)
 
 
 @app.get("/")

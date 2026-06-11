@@ -289,6 +289,17 @@ h2 {
   min-width: 160px;
 }
 
+.export-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.export-buttons a {
+  text-decoration: none;
+}
+
 .needs-action-list li {
   margin-bottom: 0.35rem;
 }
