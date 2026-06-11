@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+pydantic
+pydantic-settings
+python-dotenv
+typer
+requests
+beautifulsoup4
+playwright
+PyMuPDF
+pandas
+openpyxl
+ollama
+jinja2
