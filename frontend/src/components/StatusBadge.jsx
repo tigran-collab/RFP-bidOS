@@ -1,3 +1,3 @@
 export default function StatusBadge({ status }) {
-  return <span>{status}</span>;
+  return <span className="status-badge">{status}</span>;
 }

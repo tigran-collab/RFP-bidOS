@@ -1,0 +1,105 @@
+The backend database/API phase works and is committed. Implement frontend API connection only.
+
+Goal:
+The frontend should call the FastAPI backend and display real demo opportunities from the database.
+
+Do not implement scraper functionality yet.
+Do not implement LLM features yet.
+Do not implement file upload yet.
+Do not change the backend database models unless absolutely necessary.
+
+Backend should already have:
+- GET /opportunities
+- GET /opportunities/{id}
+- GET /sources
+- GET /health
+
+Frontend requirements:
+
+1. Update frontend/src/api.js:
+- Create a reusable API_BASE_URL.
+- Default should be http://127.0.0.1:8000.
+- Add functions:
+  - getHealth()
+  - getOpportunities()
+  - getOpportunity(id)
+  - getSources()
+
+2. Update Dashboard page:
+Show:
+- Backend connection status: Online / Offline
+- Total opportunities
+- Bid count
+- Conditional Bid count
+- No Bid count
+- Needs Review count
+- Recent opportunities table
+
+3. Update Opportunities page:
+Show a table using real GET /opportunities data.
+Columns:
+- Title
+- Agency
+- Source
+- Due Date
+- Bid Decision
+- Bid Score
+- Status
+
+Each row should link to /opportunities/:id or otherwise open the OpportunityDetail page.
+
+4. Update OpportunityDetail page:
+Call GET /opportunities/{id}.
+Show:
+- Title
+- Agency
+- Solicitation number
+- Source
+- Source URL
+- Portal URL
+- Location
+- Due date
+- Pre-bid date
+- Pre-bid mandatory
+- Q&A deadline
+- Service type
+- Contract type
+- Estimated value
+- Bid decision
+- Bid score
+- Bid reason
+- Status
+
+5. Add simple loading and error states:
+- Loading...
+- Failed to load backend data. Is the backend running?
+
+6. Styling:
+Keep it simple and clean.
+Do not add a heavy UI library.
+Use plain CSS if needed.
+
+7. Routing:
+If React Router is not installed, either install react-router-dom and use it properly or implement simple state-based page navigation.
+Prefer react-router-dom if it is straightforward.
+
+8. README:
+Add frontend/backend run instructions:
+Backend:
+cd backend
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+
+Frontend:
+cd frontend
+npm.cmd install
+npm.cmd run dev
+
+9. Test:
+After implementation, the app should run with:
+Backend at http://127.0.0.1:8000
+Frontend at http://localhost:5173
+
+The Dashboard and Opportunities pages should show the seeded demo opportunities.
+
+Stop after this phase. Do not add scraper features.

@@ -28,6 +28,7 @@ Backend:
 
 ```powershell
 cd backend
+.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload
 ```
 
@@ -35,7 +36,8 @@ Frontend:
 
 ```powershell
 cd frontend
-npm run dev
+npm.cmd install
+npm.cmd run dev
 ```
 
 ## Warning

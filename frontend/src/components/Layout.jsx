@@ -7,8 +7,9 @@ const navItems = [
 
 export default function Layout({ children, currentPage, onNavigate }) {
   return (
-    <div>
-      <nav>
+    <div className="app-shell">
+      <nav className="top-nav">
+        <div className="brand">RFP BidOS</div>
         {navItems.map((item) => (
           <button
             key={item.key}
@@ -20,7 +21,7 @@ export default function Layout({ children, currentPage, onNavigate }) {
           </button>
         ))}
       </nav>
-      <main>{children}</main>
+      <main className="page">{children}</main>
     </div>
   );
 }
