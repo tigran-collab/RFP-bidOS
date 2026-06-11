@@ -13,7 +13,7 @@ from app.services.parser import (
     parse_documents_for_opportunity,
 )
 from app.services.requirement_extractor import extract_requirements_with_local_ai
-from app.services.scraper import scrape_source
+from app.services.scraper import preview_source, scrape_source
 from app.services.scorer import score_opportunity_text
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
@@ -101,6 +101,19 @@ def seed_demo() -> None:
             enabled=False,
             notes="Disabled placeholder for future public bid page testing",
         ),
+        SourceConfig(
+            name="Demo BidNet Future Auth Placeholder",
+            source_type="public_page",
+            base_url="https://www.bidnetdirect.com",
+            enabled=False,
+            requires_credentials=True,
+            credential_type="future_secret_store",
+            credential_notes=(
+                "BidNet credentials will be added in a future authenticated-source phase."
+            ),
+            auth_status="Unsupported This Phase",
+            notes="Authenticated BidNet scraping is intentionally not implemented yet.",
+        ),
     ]
 
     with Session(engine) as session:
@@ -182,11 +195,7 @@ def scrape_source_command(source_id: int) -> None:
             raise typer.Exit(code=1)
 
     result = run_scrape_for_source(source)
-    typer.echo(f"Records found: {result['records_found']}")
-    typer.echo(f"Created: {result['created_count']}")
-    typer.echo(f"Skipped duplicates: {result['skipped_duplicates']}")
-    if result["errors"]:
-        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+    _echo_scrape_result(source.name, result)
 
 
 @cli.command("scrape-enabled-sources")
@@ -202,13 +211,25 @@ def scrape_enabled_sources_command() -> None:
 
     for source in sources:
         result = run_scrape_for_source(source)
+        _echo_scrape_result(source.name, result)
+
+
+@cli.command("preview-source")
+def preview_source_command(source_id: int) -> None:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+
+    result = preview_source(source)
+    _echo_scrape_result(source.name, result)
+    for candidate in result.get("candidates", [])[:10]:
         typer.echo(
-            f"{source.name}: {result['records_found']} found, "
-            f"{result['created_count']} created, "
-            f"{result['skipped_duplicates']} duplicates"
+            f"- {candidate['title']} | due: {candidate.get('due_date') or '-'} | "
+            f"confidence: {candidate.get('confidence_score')} | "
+            f"documents: {candidate.get('document_count')}"
         )
-        if result["errors"]:
-            typer.echo(f"{source.name} errors: {'; '.join(result['errors'])}")
 
 
 @cli.command("download-documents")
@@ -368,7 +389,7 @@ def extract_all_requirements_command() -> None:
 
 
 def run_scrape_for_source(source: SourceConfig) -> dict:
-    run = ScrapeRun(source_name=source.name, status="running")
+    run = ScrapeRun(source_name=source.name, source_id=source.id, status="running")
     with Session(engine) as session:
         session.add(run)
         session.commit()
@@ -383,11 +404,42 @@ def run_scrape_for_source(source: SourceConfig) -> dict:
             scrape_run.finished_at = utc_now()
             scrape_run.status = status
             scrape_run.records_found = result["records_found"]
+            scrape_run.created_count = result["created_count"]
+            scrape_run.updated_count = result["updated_count"]
+            scrape_run.skipped_duplicates = result["skipped_duplicates"]
             scrape_run.error_message = "; ".join(result["errors"]) or None
             session.add(scrape_run)
+        source_record = session.get(SourceConfig, source.id)
+        if source_record is not None:
+            source_record.last_scrape_at = utc_now()
+            source_record.last_scrape_status = status
+            source_record.last_scrape_summary = _scrape_summary(result)
+            session.add(source_record)
             session.commit()
 
     return result
+
+
+def _echo_scrape_result(source_name: str, result: dict) -> None:
+    typer.echo(
+        f"{source_name}: {result['records_found']} candidates, "
+        f"{result['created_count']} created, "
+        f"{result['updated_count']} updated, "
+        f"{result['skipped_duplicates']} skipped duplicates, "
+        f"{len(result['errors'])} errors"
+    )
+    if result["errors"]:
+        typer.echo(f"{source_name} errors: {'; '.join(result['errors'])}")
+
+
+def _scrape_summary(result: dict) -> str:
+    return (
+        f"{result['records_found']} candidates, "
+        f"{result['created_count']} created, "
+        f"{result['updated_count']} updated, "
+        f"{result['skipped_duplicates']} skipped duplicates, "
+        f"{len(result['errors'])} errors"
+    )
 
 
 if __name__ == "__main__":

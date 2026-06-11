@@ -84,16 +84,27 @@ class SourceConfig(SQLModel, table=True):
     login_url: str | None = None
     enabled: bool = True
     notes: str | None = None
+    requires_credentials: bool = False
+    credential_type: str | None = None
+    credential_notes: str | None = None
+    auth_status: str | None = "Not Configured"
+    last_scrape_at: datetime | None = None
+    last_scrape_status: str | None = None
+    last_scrape_summary: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ScrapeRun(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     source_name: str
+    source_id: int | None = Field(default=None, index=True)
     started_at: datetime = Field(default_factory=datetime.utcnow)
     finished_at: datetime | None = None
     status: str = "pending"
     records_found: int = 0
+    created_count: int = 0
+    updated_count: int = 0
+    skipped_duplicates: int = 0
     error_message: str | None = None
 
 

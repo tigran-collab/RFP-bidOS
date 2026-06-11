@@ -43,6 +43,7 @@ npm.cmd run dev
 cd backend
 python -m app.cli init-db
 python -m app.cli seed-demo
+python -m app.cli scrape-enabled-sources
 python -m app.cli score-all-opportunities
 python -m app.cli parse-all-documents
 python -m app.cli ai-evaluate-all-opportunities
@@ -94,6 +95,29 @@ python -m app.cli extract-all-requirements
 ```
 
 Requirements extraction is local-AI-assisted through Ollama and creates a human-reviewable compliance matrix. It does not draft proposals or submit responses.
+
+## Scraper
+
+```powershell
+cd backend
+python -m app.cli preview-source <source_id>
+python -m app.cli scrape-source <source_id>
+python -m app.cli scrape-enabled-sources
+```
+
+The scraper uses source adapters and heuristics for public procurement pages, table listings, notice pages, and direct document links. Preview shows candidates without saving them.
+
+Scraper limitations:
+
+- Public pages only.
+- No login portals or credential submission.
+- No CAPTCHA bypass.
+- No browser automation or Playwright.
+- No recursive whole-site crawling.
+- No automated submissions.
+- Extracted fields require human review.
+
+BidNet and other authenticated sources may be marked as requiring credentials, but authenticated scraping is not implemented in this phase. Credential handling should be added later through a proper secret store, not raw plaintext passwords.
 
 ## Scope Notes
 

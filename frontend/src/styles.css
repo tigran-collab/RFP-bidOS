@@ -143,6 +143,40 @@ h2 {
   opacity: 0.65;
 }
 
+.secondary-button {
+  border: 1px solid #8a97a8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #263241;
+  cursor: pointer;
+  padding: 0.55rem 0.85rem;
+  font-weight: 700;
+}
+
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.muted-text {
+  color: #667085;
+  font-size: 0.85rem;
+}
+
+.break-text {
+  overflow-wrap: anywhere;
+}
+
+.preview-section {
+  margin-top: 1.5rem;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;

@@ -19,6 +19,8 @@ def init_db() -> None:
         _ensure_document_parser_columns()
         _ensure_opportunity_ai_columns()
         _ensure_requirement_matrix_columns()
+        _ensure_source_scraper_columns()
+        _ensure_scrape_run_stat_columns()
 
 
 def _ensure_document_parser_columns() -> None:
@@ -78,5 +80,46 @@ def _ensure_requirement_matrix_columns() -> None:
             if column_name not in existing_columns:
                 session.exec(
                     text(f"ALTER TABLE requirement ADD COLUMN {column_name} {column_type}")
+                )
+        session.commit()
+
+
+def _ensure_source_scraper_columns() -> None:
+    columns = {
+        "requires_credentials": "BOOLEAN DEFAULT 0",
+        "credential_type": "VARCHAR",
+        "credential_notes": "VARCHAR",
+        "auth_status": "VARCHAR DEFAULT 'Not Configured'",
+        "last_scrape_at": "DATETIME",
+        "last_scrape_status": "VARCHAR",
+        "last_scrape_summary": "VARCHAR",
+    }
+    with Session(engine) as session:
+        existing_columns = {
+            row[1] for row in session.exec(text("PRAGMA table_info(sourceconfig)")).all()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                session.exec(
+                    text(f"ALTER TABLE sourceconfig ADD COLUMN {column_name} {column_type}")
+                )
+        session.commit()
+
+
+def _ensure_scrape_run_stat_columns() -> None:
+    columns = {
+        "source_id": "INTEGER",
+        "created_count": "INTEGER DEFAULT 0",
+        "updated_count": "INTEGER DEFAULT 0",
+        "skipped_duplicates": "INTEGER DEFAULT 0",
+    }
+    with Session(engine) as session:
+        existing_columns = {
+            row[1] for row in session.exec(text("PRAGMA table_info(scraperun)")).all()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                session.exec(
+                    text(f"ALTER TABLE scraperun ADD COLUMN {column_name} {column_type}")
                 )
         session.commit()

@@ -61,7 +61,7 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
     existing_by_url = session.exec(
         select(Document).where(Document.source_url == url)
     ).first()
-    if existing_by_url is not None:
+    if existing_by_url is not None and existing_by_url.path:
         summary["skipped_count"] += 1
         summary["documents"].append(existing_by_url)
         return summary
@@ -101,16 +101,20 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
             path.unlink(missing_ok=True)
         return summary
 
-    document = Document(
+    document = existing_by_url or Document(
         opportunity_id=opportunity_id,
-        filename=path.name,
-        path=str(path),
-        file_type=path.suffix.lower().lstrip(".") or None,
-        sha256=file_hash,
+        filename="",
+        path="",
         source_url=url,
-        downloaded_at=_utc_now(),
-        parsed_status="Not Parsed",
     )
+    document.opportunity_id = opportunity_id
+    document.filename = path.name
+    document.path = str(path)
+    document.file_type = path.suffix.lower().lstrip(".") or None
+    document.sha256 = file_hash
+    document.source_url = url
+    document.downloaded_at = _utc_now()
+    document.parsed_status = "Not Parsed"
     session.add(document)
     session.commit()
     session.refresh(document)
@@ -125,6 +129,21 @@ def download_documents_for_opportunity(opportunity_id: int, session) -> dict:
     opportunity = session.get(Opportunity, opportunity_id)
     if opportunity is None:
         summary["errors"].append("Opportunity not found")
+        return summary
+
+    pending_documents = list(
+        session.exec(
+            select(Document).where(
+                Document.opportunity_id == opportunity_id,
+                Document.source_url != None,
+                Document.path == "",
+            )
+        ).all()
+    )
+    if pending_documents:
+        for document in pending_documents:
+            result = download_document(document.source_url, opportunity_id, session)
+            summary = _merge_summary(summary, result)
         return summary
 
     if not opportunity.source_url:

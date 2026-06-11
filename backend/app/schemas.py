@@ -111,6 +111,10 @@ class SourceConfigCreate(BaseModel):
     login_url: str | None = None
     enabled: bool = True
     notes: str | None = None
+    requires_credentials: bool = False
+    credential_type: str | None = None
+    credential_notes: str | None = None
+    auth_status: str | None = "Not Configured"
 
 
 class SourceConfigUpdate(BaseModel):
@@ -120,10 +124,17 @@ class SourceConfigUpdate(BaseModel):
     login_url: str | None = None
     enabled: bool | None = None
     notes: str | None = None
+    requires_credentials: bool | None = None
+    credential_type: str | None = None
+    credential_notes: str | None = None
+    auth_status: str | None = None
 
 
 class SourceConfigRead(SourceConfigCreate):
     id: int
+    last_scrape_at: datetime | None = None
+    last_scrape_status: str | None = None
+    last_scrape_summary: str | None = None
     created_at: datetime
 
 

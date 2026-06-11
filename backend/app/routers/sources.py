@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.models import ScrapeRun, SourceConfig
 from app.schemas import SourceConfigCreate, SourceConfigRead, SourceConfigUpdate
-from app.services.scraper import scrape_source
+from app.services.scraper import preview_source, scrape_source
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -37,6 +37,7 @@ def scrape_enabled_sources() -> dict:
         "sources_scraped": 0,
         "records_found": 0,
         "created_count": 0,
+        "updated_count": 0,
         "skipped_duplicates": 0,
         "errors": [],
         "results": [],
@@ -52,6 +53,7 @@ def scrape_enabled_sources() -> dict:
         summary["sources_scraped"] += 1
         summary["records_found"] += result["records_found"]
         summary["created_count"] += result["created_count"]
+        summary["updated_count"] += result["updated_count"]
         summary["skipped_duplicates"] += result["skipped_duplicates"]
         summary["errors"].extend(result["errors"])
         summary["results"].append({"source": source.name, **result})
@@ -71,6 +73,16 @@ def scrape_source_by_id(source_id: int) -> dict:
     return _run_scrape_for_source(source)
 
 
+@router.post("/{source_id}/preview")
+def preview_source_by_id(source_id: int) -> dict:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+    return preview_source(source)
+
+
 @router.patch("/{source_id}", response_model=SourceConfigRead)
 def update_source(source_id: int, payload: SourceConfigUpdate) -> SourceConfig:
     with Session(engine) as session:
@@ -88,7 +100,7 @@ def update_source(source_id: int, payload: SourceConfigUpdate) -> SourceConfig:
 
 
 def _run_scrape_for_source(source: SourceConfig) -> dict:
-    run = ScrapeRun(source_name=source.name, status="running")
+    run = ScrapeRun(source_name=source.name, source_id=source.id, status="running")
     with Session(engine) as session:
         session.add(run)
         session.commit()
@@ -103,8 +115,27 @@ def _run_scrape_for_source(source: SourceConfig) -> dict:
             scrape_run.finished_at = utc_now()
             scrape_run.status = status
             scrape_run.records_found = result["records_found"]
+            scrape_run.created_count = result["created_count"]
+            scrape_run.updated_count = result["updated_count"]
+            scrape_run.skipped_duplicates = result["skipped_duplicates"]
             scrape_run.error_message = "; ".join(result["errors"]) or None
             session.add(scrape_run)
+        source_record = session.get(SourceConfig, source.id)
+        if source_record is not None:
+            source_record.last_scrape_at = utc_now()
+            source_record.last_scrape_status = status
+            source_record.last_scrape_summary = _scrape_summary(result)
+            session.add(source_record)
             session.commit()
 
     return result
+
+
+def _scrape_summary(result: dict) -> str:
+    return (
+        f"{result['records_found']} candidates, "
+        f"{result['created_count']} created, "
+        f"{result['updated_count']} updated, "
+        f"{result['skipped_duplicates']} skipped duplicates, "
+        f"{len(result['errors'])} errors"
+    )

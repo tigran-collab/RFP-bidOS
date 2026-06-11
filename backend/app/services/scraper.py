@@ -1,162 +1,232 @@
 from datetime import UTC, datetime
-from typing import Any
-from urllib.parse import urljoin
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Opportunity
+from app.models import Document, Opportunity
+from app.services.scrapers import GenericPublicAdapter, ScraperResult
 
-
-SCRAPER_USER_AGENT = "RFP-BidOS Public Scraper/0.1 (+single-page review)"
-BID_KEYWORDS = (
-    "bid",
-    "bids",
-    "rfp",
-    "rfq",
-    "ifb",
-    "itb",
-    "solicitation",
-    "procurement",
-    "proposal",
-    "quote",
-    "security",
-    "guard",
-    "patrol",
-    "armed",
-    "unarmed",
+AUTH_REQUIRED_MESSAGE = (
+    "This source requires credentials. Authenticated scraping is not enabled in this phase."
 )
-SECURITY_KEYWORDS = ("security", "guard", "patrol", "armed", "unarmed")
 
 
-def fetch_public_page(url: str) -> str:
-    response = requests.get(
-        url,
-        headers={"User-Agent": SCRAPER_USER_AGENT},
-        timeout=20,
-    )
-    response.raise_for_status()
-    return response.text
+def preview_source(source_config) -> dict:
+    result = _empty_result()
+    skip_message = _auth_skip_message(source_config)
+    if skip_message:
+        result["errors"].append(skip_message)
+        return result
+
+    candidates = _scrape_candidates(source_config, result)
+    result["records_found"] = len(candidates)
+    result["total_candidates_found"] = len(candidates)
+    result["candidates"] = [_candidate_to_dict(candidate) for candidate in candidates]
+    return result
 
 
-def extract_candidate_links(html: str, base_url: str) -> list[dict]:
-    soup = BeautifulSoup(html, "html.parser")
-    candidates: list[dict] = []
-    seen_urls: set[str] = set()
-
-    for anchor in soup.find_all("a", href=True):
-        title = " ".join(anchor.get_text(" ", strip=True).split())
-        href = str(anchor.get("href") or "").strip()
-        if not title and not href:
-            continue
-
-        url = urljoin(base_url, href)
-        haystack = f"{title} {url}".lower()
-        matched_terms = [keyword for keyword in BID_KEYWORDS if keyword in haystack]
-        if not matched_terms or url in seen_urls:
-            continue
-
-        seen_urls.add(url)
-        classification = classify_candidate_link(title or url, url)
-        candidates.append(
-            {
-                "title": title or url,
-                "url": url,
-                "source": base_url,
-                "source_url": url,
-                "initial_match_reason": classification["initial_match_reason"],
-                "security_likelihood": classification["security_likelihood"],
-            }
-        )
-
-    return candidates
-
-
-def classify_candidate_link(title: str, url: str) -> dict:
-    haystack = f"{title} {url}".lower()
-    matched_terms = [keyword for keyword in BID_KEYWORDS if keyword in haystack]
-    security_terms = [keyword for keyword in SECURITY_KEYWORDS if keyword in haystack]
-
-    if security_terms:
-        security_likelihood = "high"
-    elif any(keyword in matched_terms for keyword in ("rfp", "bid", "solicitation", "procurement")):
-        security_likelihood = "unknown"
-    else:
-        security_likelihood = "low"
-
-    reason = (
-        f"Matched keywords: {', '.join(matched_terms[:5])}"
-        if matched_terms
-        else "No procurement keywords matched"
-    )
-
-    return {
-        "initial_match_reason": reason,
-        "security_likelihood": security_likelihood,
-    }
-
-
-def scrape_source(source_config: Any) -> dict:
-    result = {
-        "records_found": 0,
-        "created_count": 0,
-        "skipped_duplicates": 0,
-        "errors": [],
-    }
+def scrape_source(source_config) -> dict:
+    result = _empty_result()
 
     if not getattr(source_config, "enabled", False):
         result["errors"].append("Source is disabled")
         return result
 
-    base_url = getattr(source_config, "base_url", None)
-    if not base_url:
-        result["errors"].append("Source has no base_url")
+    skip_message = _auth_skip_message(source_config)
+    if skip_message:
+        result["errors"].append(skip_message)
         return result
 
-    try:
-        html = fetch_public_page(base_url)
-        candidates = extract_candidate_links(html, base_url)
-    except requests.RequestException as exc:
-        result["errors"].append(str(exc))
-        return result
-
+    candidates = _scrape_candidates(source_config, result)
     result["records_found"] = len(candidates)
+    result["total_candidates_found"] = len(candidates)
 
     with Session(engine) as session:
         for candidate in candidates:
-            existing = session.exec(
-                select(Opportunity).where(Opportunity.source_url == candidate["url"])
-            ).first()
-            if existing is not None:
-                result["skipped_duplicates"] += 1
+            existing = _find_existing_opportunity(session, candidate, source_config)
+            if existing is None:
+                opportunity = _create_opportunity(candidate, source_config)
+                session.add(opportunity)
+                session.flush()
+                _attach_document_urls(session, opportunity, candidate.document_urls)
+                result["created_count"] += 1
                 continue
 
-            opportunity = Opportunity(
-                title=candidate["title"],
-                agency=source_config.name,
-                source=source_config.name,
-                source_url=candidate["url"],
-                portal_url=base_url,
-                status="Needs Review",
-                bid_decision="Needs Review",
-                service_type=_guess_service_type(candidate),
-                updated_at=_utc_now(),
-            )
-            session.add(opportunity)
-            result["created_count"] += 1
+            updated = _update_opportunity_if_safe(existing, candidate)
+            _attach_document_urls(session, existing, candidate.document_urls)
+            if updated:
+                existing.updated_at = _utc_now()
+                session.add(existing)
+                result["updated_count"] += 1
+            else:
+                result["skipped_duplicates"] += 1
 
         session.commit()
 
     return result
 
 
-def _guess_service_type(candidate: dict) -> str | None:
-    haystack = f"{candidate.get('title', '')} {candidate.get('url', '')}".lower()
-    if any(keyword in haystack for keyword in SECURITY_KEYWORDS):
-        return "Security services"
+def _scrape_candidates(source_config, result: dict) -> list[ScraperResult]:
+    base_url = getattr(source_config, "base_url", None)
+    if not base_url:
+        result["errors"].append("Source has no base_url")
+        return []
+
+    adapter = GenericPublicAdapter()
+    if not adapter.can_handle(source_config):
+        result["errors"].append(f"Unsupported source type: {source_config.source_type}")
+        return []
+
+    try:
+        return adapter.scrape(source_config)
+    except requests.RequestException as exc:
+        result["errors"].append(str(exc))
+    except Exception as exc:
+        result["errors"].append(f"Scraper failed: {exc}")
+    return []
+
+
+def _auth_skip_message(source_config) -> str | None:
+    requires_credentials = bool(getattr(source_config, "requires_credentials", False))
+    name = (getattr(source_config, "name", "") or "").lower()
+    base_url = (getattr(source_config, "base_url", "") or "").lower()
+    is_bidnet = "bidnet" in name or "bidnet" in base_url
+    if requires_credentials or is_bidnet and getattr(source_config, "login_url", None):
+        return AUTH_REQUIRED_MESSAGE
     return None
+
+
+def _find_existing_opportunity(session: Session, candidate: ScraperResult, source_config):
+    urls = {candidate.source_url, candidate.detail_url}
+    urls.discard(None)
+    for url in urls:
+        existing = session.exec(select(Opportunity).where(Opportunity.source_url == url)).first()
+        if existing is not None:
+            return existing
+
+    if candidate.solicitation_number:
+        existing = session.exec(
+            select(Opportunity).where(
+                Opportunity.solicitation_number == candidate.solicitation_number
+            )
+        ).first()
+        if existing is not None:
+            return existing
+
+    existing = session.exec(
+        select(Opportunity).where(
+            Opportunity.title == candidate.title,
+            Opportunity.source == getattr(source_config, "name", None),
+        )
+    ).first()
+    return existing
+
+
+def _create_opportunity(candidate: ScraperResult, source_config) -> Opportunity:
+    return Opportunity(
+        title=candidate.title,
+        agency=candidate.agency or getattr(source_config, "name", None),
+        solicitation_number=candidate.solicitation_number,
+        source=getattr(source_config, "name", None),
+        source_url=candidate.detail_url or candidate.source_url,
+        portal_url=candidate.portal_url or getattr(source_config, "base_url", None),
+        location=candidate.location,
+        due_date=candidate.due_date,
+        pre_bid_date=candidate.pre_bid_date,
+        q_and_a_deadline=candidate.q_and_a_deadline,
+        service_type=candidate.service_type,
+        contract_type=candidate.contract_type,
+        estimated_value=candidate.estimated_value,
+        status="Needs Review",
+        bid_decision="Needs Review",
+        updated_at=_utc_now(),
+    )
+
+
+def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResult) -> bool:
+    updated = False
+    safe_fields = (
+        "agency",
+        "solicitation_number",
+        "portal_url",
+        "location",
+        "due_date",
+        "pre_bid_date",
+        "q_and_a_deadline",
+        "service_type",
+        "contract_type",
+        "estimated_value",
+    )
+    for field in safe_fields:
+        if getattr(opportunity, field) in (None, "") and getattr(candidate, field) not in (None, ""):
+            setattr(opportunity, field, getattr(candidate, field))
+            updated = True
+    if not opportunity.source_url and (candidate.detail_url or candidate.source_url):
+        opportunity.source_url = candidate.detail_url or candidate.source_url
+        updated = True
+    return updated
+
+
+def _attach_document_urls(session: Session, opportunity: Opportunity, document_urls: list[str]) -> None:
+    if opportunity.id is None:
+        return
+    for url in document_urls:
+        existing = session.exec(select(Document).where(Document.source_url == url)).first()
+        if existing is not None:
+            continue
+        document = Document(
+            opportunity_id=opportunity.id,
+            filename=_filename_from_url(url),
+            path="",
+            file_type=Path(urlparse(url).path).suffix.lower().lstrip(".") or None,
+            source_url=url,
+            parsed_status="Not Downloaded",
+        )
+        session.add(document)
+
+
+def _candidate_to_dict(candidate: ScraperResult) -> dict:
+    return {
+        "title": candidate.title,
+        "agency": candidate.agency,
+        "solicitation_number": candidate.solicitation_number,
+        "source_url": candidate.source_url,
+        "detail_url": candidate.detail_url,
+        "portal_url": candidate.portal_url,
+        "location": candidate.location,
+        "due_date": candidate.due_date.isoformat() if candidate.due_date else None,
+        "pre_bid_date": candidate.pre_bid_date.isoformat() if candidate.pre_bid_date else None,
+        "q_and_a_deadline": (
+            candidate.q_and_a_deadline.isoformat() if candidate.q_and_a_deadline else None
+        ),
+        "service_type": candidate.service_type,
+        "contract_type": candidate.contract_type,
+        "estimated_value": candidate.estimated_value,
+        "description": candidate.description,
+        "document_urls": candidate.document_urls,
+        "document_count": len(candidate.document_urls),
+        "confidence_score": candidate.confidence_score,
+    }
+
+
+def _filename_from_url(url: str) -> str:
+    name = Path(unquote(urlparse(url).path)).name
+    return name or "document"
+
+
+def _empty_result() -> dict:
+    return {
+        "records_found": 0,
+        "total_candidates_found": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_duplicates": 0,
+        "errors": [],
+        "candidates": [],
+    }
 
 
 def _utc_now() -> datetime:

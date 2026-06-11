@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getSources, scrapeEnabledSources, scrapeSource } from "../api.js";
+import { getSources, previewSource, scrapeEnabledSources, scrapeSource } from "../api.js";
 
 const errorMessage = "Failed to load source data. Is the backend running?";
 
@@ -14,6 +14,7 @@ function formatResult(result) {
       `${result.sources_scraped} sources scraped, ` +
       `${result.records_found} records found, ` +
       `${result.created_count} created, ` +
+      `${result.updated_count || 0} updated, ` +
       `${result.skipped_duplicates} duplicates skipped`
     );
   }
@@ -21,14 +22,24 @@ function formatResult(result) {
   return (
     `${result.records_found} records found, ` +
     `${result.created_count} created, ` +
+    `${result.updated_count || 0} updated, ` +
     `${result.skipped_duplicates} duplicates skipped`
   );
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "";
+  }
+  return new Date(value).toLocaleString();
 }
 
 export default function Scraper() {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState("");
+  const [previewing, setPreviewing] = useState("");
+  const [preview, setPreview] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -58,6 +69,20 @@ export default function Scraper() {
       setError("Failed to scrape source.");
     } finally {
       setScraping("");
+    }
+  }
+
+  async function runSourcePreview(source) {
+    try {
+      setPreviewing(String(source.id));
+      const result = await previewSource(source.id);
+      setPreview({ sourceName: source.name, result });
+      setMessage(`${source.name}: ${result.records_found} preview candidates`);
+      setError("");
+    } catch {
+      setError("Failed to preview source.");
+    } finally {
+      setPreviewing("");
     }
   }
 
@@ -100,22 +125,41 @@ export default function Scraper() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Type</th>
-              <th>Base URL</th>
+              <th>Source URL</th>
               <th>Enabled</th>
-              <th>Notes</th>
-              <th>Action</th>
+              <th>Last Scrape</th>
+              <th>Last Stats</th>
+              <th>Auth</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {sources.map((source) => (
               <tr key={source.id}>
-                <td>{source.name}</td>
-                <td>{source.source_type}</td>
-                <td>{source.base_url || ""}</td>
-                <td>{source.enabled ? "Yes" : "No"}</td>
-                <td>{source.notes || ""}</td>
                 <td>
+                  <strong>{source.name}</strong>
+                  <div className="muted-text">{source.source_type}</div>
+                </td>
+                <td className="break-text">{source.base_url || ""}</td>
+                <td>{source.enabled ? "Yes" : "No"}</td>
+                <td>{formatDate(source.last_scrape_at)}</td>
+                <td>{source.last_scrape_summary || ""}</td>
+                <td>
+                  {source.requires_credentials ? "Credentials required" : "Public"}
+                  {source.auth_status ? (
+                    <div className="muted-text">{source.auth_status}</div>
+                  ) : null}
+                </td>
+                <td>
+                  <div className="button-row">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={previewing !== "" || scraping !== ""}
+                      onClick={() => runSourcePreview(source)}
+                    >
+                      {previewing === String(source.id) ? "Previewing..." : "Preview"}
+                    </button>
                   <button
                     className="primary-button"
                     type="button"
@@ -124,12 +168,51 @@ export default function Scraper() {
                   >
                     {scraping === String(source.id) ? "Scraping..." : "Scrape Source"}
                   </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+      {preview ? (
+        <section className="preview-section">
+          <h2>Preview: {preview.sourceName}</h2>
+          {preview.result.errors?.length ? (
+            <p className="error-text">{preview.result.errors.join("; ")}</p>
+          ) : null}
+          {!preview.result.candidates?.length ? (
+            <p>No preview candidates found.</p>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Agency</th>
+                  <th>Due Date</th>
+                  <th>Detail URL</th>
+                  <th>Confidence</th>
+                  <th>Service</th>
+                  <th>Docs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.result.candidates.map((candidate, index) => (
+                  <tr key={`${candidate.detail_url || candidate.source_url}-${index}`}>
+                    <td>{candidate.title}</td>
+                    <td>{candidate.agency || ""}</td>
+                    <td>{candidate.due_date ? new Date(candidate.due_date).toLocaleString() : ""}</td>
+                    <td className="break-text">{candidate.detail_url || candidate.source_url || ""}</td>
+                    <td>{candidate.confidence_score}</td>
+                    <td>{candidate.service_type || ""}</td>
+                    <td>{candidate.document_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      ) : null}
     </section>
   );
 }

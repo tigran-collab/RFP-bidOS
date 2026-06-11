@@ -68,6 +68,10 @@ export function scrapeSource(id) {
   return request(`/sources/${id}/scrape`, { method: "POST" });
 }
 
+export function previewSource(id) {
+  return request(`/sources/${id}/preview`, { method: "POST" });
+}
+
 export function scrapeEnabledSources() {
   return request("/sources/scrape-enabled", { method: "POST" });
 }
