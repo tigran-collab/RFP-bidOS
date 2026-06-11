@@ -47,6 +47,9 @@ def scrape_enabled_sources() -> dict:
     summary = {
         "sources_scraped": 0,
         "records_found": 0,
+        "candidates_found": 0,
+        "candidates_kept": 0,
+        "candidates_filtered": 0,
         "created_count": 0,
         "updated_count": 0,
         "skipped_duplicates": 0,
@@ -63,6 +66,9 @@ def scrape_enabled_sources() -> dict:
         result = _run_scrape_for_source(source)
         summary["sources_scraped"] += 1
         summary["records_found"] += result["records_found"]
+        summary["candidates_found"] += result.get("total_candidates_found", 0)
+        summary["candidates_kept"] += result.get("candidates_kept", 0)
+        summary["candidates_filtered"] += result.get("candidates_filtered", 0)
         summary["created_count"] += result["created_count"]
         summary["updated_count"] += result["updated_count"]
         summary["skipped_duplicates"] += result["skipped_duplicates"]

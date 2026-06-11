@@ -242,19 +242,24 @@ def scrape_enabled_sources_command() -> None:
 
 
 @cli.command("preview-source")
-def preview_source_command(source_id: int) -> None:
+def preview_source_command(
+    source_id: int,
+    show_filtered: bool = typer.Option(
+        False, "--show-filtered", help="Also show candidates rejected by the quality filter"
+    ),
+) -> None:
     with Session(engine) as session:
         source = session.get(SourceConfig, source_id)
         if source is None:
             typer.echo(f"Source not found: {source_id}", err=True)
             raise typer.Exit(code=1)
 
-    result = preview_source(source)
+    result = preview_source(source, include_filtered=show_filtered)
     _echo_scrape_result(source.name, result)
     for candidate in result.get("candidates", [])[:10]:
         typer.echo(
             f"- {candidate['title']} | due: {candidate.get('due_date') or '-'} | "
-            f"confidence: {candidate.get('confidence_score')} | "
+            f"quality: {candidate.get('quality_score')} | "
             f"documents: {candidate.get('document_count')}"
         )
 
@@ -263,6 +268,9 @@ def preview_source_command(source_id: int) -> None:
 def preview_enabled_sources_command(
     detail_limit: int = typer.Option(3, help="Max detail pages fetched per source"),
     top: int = typer.Option(5, help="Top candidate titles to print per source"),
+    show_filtered: bool = typer.Option(
+        False, "--show-filtered", help="Also show candidates rejected by the quality filter"
+    ),
 ) -> None:
     """Smoke-test all enabled sources without saving opportunities."""
     with Session(engine) as session:
@@ -276,21 +284,30 @@ def preview_enabled_sources_command(
 
     for source in sources:
         try:
-            result = preview_source(source, detail_limit=detail_limit)
+            result = preview_source(
+                source, detail_limit=detail_limit, include_filtered=show_filtered
+            )
         except Exception as exc:
             typer.echo(f"{source.name}: preview failed ({exc})")
             continue
 
         typer.echo(
             f"{source.name} [{source.state or '-'} | {source.portal_type or '-'}]: "
-            f"{result['records_found']} candidates, {len(result['errors'])} errors"
+            f"{result.get('total_candidates_found', 0)} found, "
+            f"{result.get('candidates_kept', 0)} kept, "
+            f"{result.get('candidates_filtered', 0)} filtered, "
+            f"{len(result['errors'])} errors"
         )
         for candidate in result.get("candidates", [])[:top]:
             typer.echo(
                 f"  - {candidate['title'][:90]} "
-                f"(confidence: {candidate.get('confidence_score')}, "
+                f"(quality: {candidate.get('quality_score')}, "
                 f"docs: {candidate.get('document_count')})"
             )
+        reasons = result.get("filter_reasons") or {}
+        if reasons:
+            summary = ", ".join(f"{reason} x{count}" for reason, count in reasons.items())
+            typer.echo(f"  filter reasons: {summary}")
         if result["errors"]:
             typer.echo(f"  errors: {'; '.join(result['errors'])}")
 
@@ -528,12 +545,18 @@ def run_scrape_for_source(source: SourceConfig) -> dict:
 
 def _echo_scrape_result(source_name: str, result: dict) -> None:
     typer.echo(
-        f"{source_name}: {result['records_found']} candidates, "
+        f"{source_name}: {result.get('total_candidates_found', result['records_found'])} found, "
+        f"{result.get('candidates_kept', result['records_found'])} kept, "
+        f"{result.get('candidates_filtered', 0)} filtered, "
         f"{result['created_count']} created, "
         f"{result['updated_count']} updated, "
         f"{result['skipped_duplicates']} skipped duplicates, "
         f"{len(result['errors'])} errors"
     )
+    reasons = result.get("filter_reasons") or {}
+    if reasons:
+        summary = ", ".join(f"{reason} x{count}" for reason, count in reasons.items())
+        typer.echo(f"  filtered: {summary}")
     if result["errors"]:
         typer.echo(f"{source_name} errors: {'; '.join(result['errors'])}")
 

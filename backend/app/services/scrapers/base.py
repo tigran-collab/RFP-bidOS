@@ -22,6 +22,7 @@ class ScraperResult:
     document_urls: list[str] = field(default_factory=list)
     raw_text: str | None = None
     confidence_score: float = 0.0
+    quality_score: float = 0.0
 
 
 class BaseScraperAdapter(Protocol):

@@ -8,13 +8,16 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.models import Document, Opportunity
 from app.services.scrapers import GenericPublicAdapter, ScraperResult
+from app.services.scrapers.quality import assess_candidate
 
 AUTH_REQUIRED_MESSAGE = (
     "This source requires credentials. Authenticated scraping is not enabled in this phase."
 )
 
 
-def preview_source(source_config, detail_limit: int | None = None) -> dict:
+def preview_source(
+    source_config, detail_limit: int | None = None, include_filtered: bool = False
+) -> dict:
     result = _empty_result()
     skip_message = _auth_skip_message(source_config)
     if skip_message:
@@ -22,9 +25,15 @@ def preview_source(source_config, detail_limit: int | None = None) -> dict:
         return result
 
     candidates = _scrape_candidates(source_config, result, detail_limit=detail_limit)
-    result["records_found"] = len(candidates)
+    kept, filtered, reasons = _filter_candidates(candidates, source_config)
+
     result["total_candidates_found"] = len(candidates)
-    result["candidates"] = [_candidate_to_dict(candidate) for candidate in candidates]
+    result["candidates_kept"] = len(kept)
+    result["candidates_filtered"] = len(filtered)
+    result["filter_reasons"] = reasons
+    result["records_found"] = len(kept)
+    shown = kept + filtered if include_filtered else kept
+    result["candidates"] = [_candidate_to_dict(candidate) for candidate in shown]
     return result
 
 
@@ -41,11 +50,15 @@ def scrape_source(source_config) -> dict:
         return result
 
     candidates = _scrape_candidates(source_config, result)
-    result["records_found"] = len(candidates)
+    kept, filtered, reasons = _filter_candidates(candidates, source_config)
     result["total_candidates_found"] = len(candidates)
+    result["candidates_kept"] = len(kept)
+    result["candidates_filtered"] = len(filtered)
+    result["filter_reasons"] = reasons
+    result["records_found"] = len(kept)
 
     with Session(engine) as session:
-        for candidate in candidates:
+        for candidate in kept:
             existing = _find_existing_opportunity(session, candidate, source_config)
             if existing is None:
                 opportunity = _create_opportunity(candidate, source_config)
@@ -93,6 +106,30 @@ def _scrape_candidates(
     except Exception as exc:
         result["errors"].append(f"Scraper failed: {exc}")
     return []
+
+
+def _filter_candidates(
+    candidates: list[ScraperResult], source_config
+) -> tuple[list[ScraperResult], list[ScraperResult], dict]:
+    """Split candidates into kept/filtered by quality heuristics.
+
+    Returns (kept, filtered, reason_counts). Each candidate's quality_score
+    is populated for transparency.
+    """
+    source_title = getattr(source_config, "name", None)
+    kept: list[ScraperResult] = []
+    filtered: list[ScraperResult] = []
+    reasons: dict[str, int] = {}
+    for candidate in candidates:
+        assessment = assess_candidate(candidate, source_config, source_title=source_title)
+        candidate.quality_score = assessment.score
+        if assessment.keep:
+            kept.append(candidate)
+        else:
+            filtered.append(candidate)
+            reason = assessment.reason or "below quality threshold"
+            reasons[reason] = reasons.get(reason, 0) + 1
+    return kept, filtered, reasons
 
 
 def _auth_skip_message(source_config) -> str | None:
@@ -215,6 +252,7 @@ def _candidate_to_dict(candidate: ScraperResult) -> dict:
         "document_urls": candidate.document_urls,
         "document_count": len(candidate.document_urls),
         "confidence_score": candidate.confidence_score,
+        "quality_score": candidate.quality_score,
     }
 
 
@@ -227,6 +265,9 @@ def _empty_result() -> dict:
     return {
         "records_found": 0,
         "total_candidates_found": 0,
+        "candidates_kept": 0,
+        "candidates_filtered": 0,
+        "filter_reasons": {},
         "created_count": 0,
         "updated_count": 0,
         "skipped_duplicates": 0,

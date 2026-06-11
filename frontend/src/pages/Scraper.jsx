@@ -32,10 +32,15 @@ function formatResult(result) {
     return "";
   }
 
+  const filtered =
+    result.candidates_filtered !== undefined
+      ? `, ${result.candidates_kept} kept / ${result.candidates_filtered} filtered`
+      : "";
+
   if (result.sources_scraped !== undefined) {
     return (
       `${result.sources_scraped} sources scraped, ` +
-      `${result.records_found} records found, ` +
+      `${result.records_found} records found${filtered}, ` +
       `${result.created_count} created, ` +
       `${result.updated_count || 0} updated, ` +
       `${result.skipped_duplicates} duplicates skipped`
@@ -43,7 +48,7 @@ function formatResult(result) {
   }
 
   return (
-    `${result.records_found} records found, ` +
+    `${result.records_found} records found${filtered}, ` +
     `${result.created_count} created, ` +
     `${result.updated_count || 0} updated, ` +
     `${result.skipped_duplicates} duplicates skipped`
@@ -168,7 +173,10 @@ export default function Scraper() {
       setPreviewing(String(source.id));
       const result = await previewSource(source.id);
       setPreview({ sourceName: source.name, result });
-      setMessage(`${source.name}: ${result.records_found} preview candidates`);
+      setMessage(
+        `${source.name}: ${result.candidates_kept} kept, ` +
+          `${result.candidates_filtered} filtered (of ${result.total_candidates_found} found)`,
+      );
       setError("");
     } catch {
       setError("Failed to preview source.");
