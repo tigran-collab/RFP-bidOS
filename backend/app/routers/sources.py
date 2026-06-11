@@ -53,6 +53,8 @@ def scrape_enabled_sources() -> dict:
         "created_count": 0,
         "updated_count": 0,
         "skipped_duplicates": 0,
+        "documents_discovered": 0,
+        "documents_skipped": 0,
         "errors": [],
         "results": [],
     }
@@ -72,6 +74,8 @@ def scrape_enabled_sources() -> dict:
         summary["created_count"] += result["created_count"]
         summary["updated_count"] += result["updated_count"]
         summary["skipped_duplicates"] += result["skipped_duplicates"]
+        summary["documents_discovered"] += result.get("documents_discovered", 0)
+        summary["documents_skipped"] += result.get("documents_skipped", 0)
         summary["errors"].extend(result["errors"])
         summary["results"].append({"source": source.name, **result})
 

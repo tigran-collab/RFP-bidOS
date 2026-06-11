@@ -19,6 +19,7 @@ from app.services.ai_evaluator import (
 )
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import parse_documents_for_opportunity
+from app.services.scraper import discover_documents_for_opportunity
 from app.services.requirement_extractor import (
     INVALID_JSON,
     NO_PARSED_TEXT,
@@ -142,6 +143,15 @@ def list_opportunity_documents(opportunity_id: int) -> list[Document]:
             raise HTTPException(status_code=404, detail="Opportunity not found")
         statement = select(Document).where(Document.opportunity_id == opportunity_id)
         return list(session.exec(statement).all())
+
+
+@router.post("/{opportunity_id}/discover-documents")
+def discover_opportunity_documents(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        return discover_documents_for_opportunity(opportunity_id, session)
 
 
 @router.post("/{opportunity_id}/download-documents")

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   aiEvaluateOpportunity,
+  discoverOpportunityDocuments,
   downloadOpportunityDocuments,
   extractOpportunityRequirements,
   getOpportunity,
@@ -74,6 +75,7 @@ export default function OpportunityDetail({ opportunityId }) {
   const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
@@ -130,6 +132,23 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to score opportunity. Is the backend running?");
     } finally {
       setScoring(false);
+    }
+  }
+
+  async function runDiscover() {
+    try {
+      setDiscovering(true);
+      const result = await discoverOpportunityDocuments(opportunityId);
+      setDocuments(await getOpportunityDocuments(opportunityId));
+      setActionMessage(
+        `${result.documents_discovered} new document links discovered, ` +
+          `${result.documents_skipped} already known.`,
+      );
+      setActionError(result.errors?.length ? result.errors.join("; ") : "");
+    } catch {
+      setActionError("Failed to discover documents. Is the backend running?");
+    } finally {
+      setDiscovering(false);
     }
   }
 
@@ -214,7 +233,8 @@ export default function OpportunityDetail({ opportunityId }) {
   }
 
   const latestEvaluation = evaluations[0] || null;
-  const busy = scoring || downloading || parsing || aiEvaluating || extracting;
+  const busy =
+    scoring || discovering || downloading || parsing || aiEvaluating || extracting;
 
   return (
     <section>
@@ -227,6 +247,14 @@ export default function OpportunityDetail({ opportunityId }) {
           onClick={runScore}
         >
           {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runDiscover}
+        >
+          {discovering ? "Discovering..." : "Discover Documents"}
         </button>
         <button
           className="primary-button"
@@ -372,16 +400,19 @@ export default function OpportunityDetail({ opportunityId }) {
           </tbody>
         </table>
       )}
-      <h2>Documents</h2>
+      <h2>Documents ({documents.length})</h2>
       {!documents.length ? (
-        <p>No documents found.</p>
+        <p>
+          No documents found. Use Discover Documents to find document links on the
+          source page, then Download Documents to fetch them.
+        </p>
       ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <th>Filename</th>
+              <th>Filename / Link</th>
               <th>File Type</th>
-              <th>Parsed Status</th>
+              <th>Status</th>
               <th>Extracted Text Path</th>
               <th>Source URL</th>
             </tr>
@@ -389,11 +420,23 @@ export default function OpportunityDetail({ opportunityId }) {
           <tbody>
             {documents.map((document) => (
               <tr key={document.id}>
-                <td>{document.filename}</td>
+                <td>{document.filename || "(discovered link)"}</td>
                 <td>{document.file_type || ""}</td>
-                <td>{document.parsed_status}</td>
+                <td>
+                  {document.path
+                    ? document.parsed_status
+                    : "Discovered (not downloaded)"}
+                </td>
                 <td>{document.extracted_text_path || ""}</td>
-                <td>{document.source_url || ""}</td>
+                <td className="break-text">
+                  {document.source_url ? (
+                    <a href={document.source_url} target="_blank" rel="noreferrer">
+                      {document.source_url}
+                    </a>
+                  ) : (
+                    ""
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

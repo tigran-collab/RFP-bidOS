@@ -7,6 +7,7 @@ from app.services.scrapers.base import ScraperResult
 from app.services.scrapers.extraction_utils import (
     confidence_from_text,
     extract_contract_type,
+    extract_document_candidates,
     extract_document_urls,
     extract_due_date,
     extract_estimated_value,
@@ -16,6 +17,7 @@ from app.services.scrapers.extraction_utils import (
     extract_q_and_a_deadline,
     extract_service_type,
     extract_solicitation_number,
+    is_document_url,
     normalize_space,
     visible_text_from_html,
 )
@@ -65,9 +67,10 @@ class GenericPublicAdapter:
         html = self._fetch(base_url)
         source_kind = classify_source(html, base_url)
         results = parse_tables(html, base_url, portal_url=base_url)
-        document_urls = extract_document_urls(html, base_url)
+        document_candidates = extract_document_candidates(html, base_url)
+        document_urls = [c["url"] for c in document_candidates if is_document_url(c["url"])]
 
-        if document_urls:
+        if document_candidates:
             page_text = visible_text_from_html(html)
             page_title = extract_page_title(html, fallback=getattr(source_config, "name", base_url))
             results.append(
@@ -78,6 +81,7 @@ class GenericPublicAdapter:
                     detail_url=None,
                     portal_url=base_url,
                     document_urls=document_urls,
+                    document_candidates=document_candidates,
                     source_config=source_config,
                 )
             )
@@ -89,7 +93,10 @@ class GenericPublicAdapter:
                 detail_html = self._fetch(link["url"])
             except requests.RequestException:
                 continue
-            detail_documents = extract_document_urls(detail_html, link["url"])
+            detail_candidates = extract_document_candidates(detail_html, link["url"])
+            detail_documents = [
+                c["url"] for c in detail_candidates if is_document_url(c["url"])
+            ]
             text = visible_text_from_html(detail_html)
             title = extract_page_title(detail_html, fallback=link["title"])
             results.append(
@@ -100,6 +107,7 @@ class GenericPublicAdapter:
                     detail_url=link["url"],
                     portal_url=base_url,
                     document_urls=detail_documents,
+                    document_candidates=detail_candidates,
                     source_config=source_config,
                 )
             )
@@ -150,6 +158,7 @@ class GenericPublicAdapter:
         portal_url: str,
         document_urls: list[str],
         source_config,
+        document_candidates: list[dict] | None = None,
     ) -> ScraperResult:
         title = normalize_space(title) or "Untitled opportunity"
         description = text[:1000] if text else None
@@ -169,6 +178,7 @@ class GenericPublicAdapter:
             estimated_value=extract_estimated_value(text),
             description=description,
             document_urls=document_urls,
+            document_candidates=document_candidates or [],
             raw_text=text,
             confidence_score=confidence_from_text(title, text, document_urls),
         )

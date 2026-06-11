@@ -44,6 +44,10 @@ export function getOpportunityDocuments(id) {
   return request(`/opportunities/${id}/documents`);
 }
 
+export function discoverOpportunityDocuments(id) {
+  return request(`/opportunities/${id}/discover-documents`, { method: "POST" });
+}
+
 export function downloadOpportunityDocuments(id) {
   return request(`/opportunities/${id}/download-documents`, { method: "POST" });
 }

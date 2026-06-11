@@ -111,6 +111,17 @@ The scraper uses source adapters and heuristics for public procurement pages, ta
 
 The public scraper uses heuristic quality filters to reduce page navigation/footer noise (e.g. "Home", "Contact", "Mobile main navigation") before candidates are saved as opportunities. Filtered counts and reasons are reported by `preview-source`, `preview-enabled-sources`, and `scrape-enabled-sources`; use `--show-filtered` on the preview commands to inspect rejected candidates. Results still require human review.
 
+The public scraper attempts to discover solicitation document links (PDFs, addenda, bid packets, specifications, forms, attachments, and other downloadable files) from public pages. Each discovered link gets a confidence score and reason; social/login/nav links are rejected. Downloading and parsing are separate steps:
+
+```powershell
+cd backend
+python -m app.cli discover-documents <opportunity_id>
+python -m app.cli download-all-documents
+python -m app.cli parse-all-documents
+```
+
+Some portals hide documents behind JavaScript or login and will require future controlled support.
+
 Scraper limitations:
 
 - Public pages only.

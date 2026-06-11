@@ -20,6 +20,7 @@ class ScraperResult:
     estimated_value: float | None = None
     description: str | None = None
     document_urls: list[str] = field(default_factory=list)
+    document_candidates: list[dict] = field(default_factory=list)
     raw_text: str | None = None
     confidence_score: float = 0.0
     quality_score: float = 0.0

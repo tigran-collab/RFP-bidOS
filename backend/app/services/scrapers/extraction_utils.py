@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import unquote, urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -40,7 +40,95 @@ DOCUMENT_EXTENSIONS = {
     ".xlsx",
     ".csv",
     ".zip",
+    ".txt",
 }
+
+# Strong solicitation-document signals: high confidence even without a file
+# extension, because the link text alone clearly names a bid document.
+STRONG_DOCUMENT_KEYWORDS = (
+    "rfp",
+    "rfq",
+    "ifb",
+    "itb",
+    "bid packet",
+    "bid documents",
+    "solicitation",
+    "addendum",
+    "addenda",
+    "attachment",
+    "exhibit",
+    "scope of work",
+    "sow",
+    "specification",
+    "specs",
+    "proposal form",
+    "bid form",
+    "price sheet",
+    "pricing sheet",
+    "sample contract",
+    "notice inviting bids",
+    "nib",
+)
+
+# Weaker but still document-like signals.
+WEAK_DOCUMENT_KEYWORDS = (
+    "insurance",
+    "terms and conditions",
+    "q&a",
+    "questions and answers",
+    "amendment",
+    "form",
+    "packet",
+)
+
+GENERIC_LINK_TEXT = {
+    "",
+    "click here",
+    "click",
+    "download",
+    "view",
+    "open",
+    "read more",
+    "more",
+    "link",
+    "here",
+    "details",
+    "learn more",
+}
+
+# Nav/footer link text that should never be treated as a document, unless the
+# href is itself a direct downloadable file.
+DOCUMENT_REJECT_KEYWORDS = (
+    "privacy",
+    "accessibility",
+    "terms of use",
+    "contact",
+    "contact us",
+    "careers",
+    "sitemap",
+    "site map",
+    "login",
+    "log in",
+    "sign in",
+    "register",
+    "registration",
+    "vendor registration",
+    "subscribe",
+    "home",
+)
+
+SOCIAL_DOMAINS = (
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "linkedin.com",
+    "youtube.com",
+    "youtu.be",
+    "instagram.com",
+    "flickr.com",
+    "pinterest.com",
+    "tiktok.com",
+)
 
 DATE_PATTERNS = (
     r"\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*(?:am|pm)?)?",
@@ -74,23 +162,109 @@ def extract_page_title(html: str, fallback: str) -> str:
     return fallback
 
 
-def extract_document_urls(html: str, base_url: str) -> list[str]:
+def extract_document_candidates(
+    html: str, base_url: str, allow_external: bool = False
+) -> list[dict]:
+    """Discover document-like links from a page.
+
+    Returns a list of dicts with url, label, file_type, confidence_score, and
+    reason, sorted by confidence descending. Relative URLs are resolved,
+    fragments stripped, and mailto/tel/javascript/social/nav links rejected.
+    """
     soup = BeautifulSoup(html, "html.parser")
-    urls: list[str] = []
+    base_host = urlparse(base_url).netloc.lower()
     seen: set[str] = set()
+    candidates: list[dict] = []
     for anchor in soup.find_all("a", href=True):
-        url = urljoin(base_url, str(anchor.get("href") or "").strip())
-        if not is_document_url(url) or url in seen:
+        raw = str(anchor.get("href") or "").strip()
+        if not raw or raw.lower().startswith(("mailto:", "tel:", "javascript:", "#")):
             continue
+        url, _fragment = urldefrag(urljoin(base_url, raw))
+        if not url.lower().startswith(("http://", "https://")) or url in seen:
+            continue
+
+        host = urlparse(url).netloc.lower()
+        is_file = is_document_url(url)
+        # Same-host by default; external links only when they are direct files
+        # or external document hosting is explicitly allowed.
+        if host != base_host and not (is_file or allow_external):
+            continue
+
+        text = normalize_space(anchor.get_text(" ", strip=True))
+        scored = _score_document_link(text, url, is_file)
+        if scored is None:
+            continue
+
         seen.add(url)
-        urls.append(url)
-    return urls
+        candidates.append(
+            {
+                "url": url,
+                "label": text or _filename_label(url),
+                "file_type": _file_type(url),
+                "confidence_score": scored[0],
+                "reason": scored[1],
+            }
+        )
+    candidates.sort(key=lambda candidate: candidate["confidence_score"], reverse=True)
+    return candidates
+
+
+def extract_document_urls(html: str, base_url: str) -> list[str]:
+    """Direct downloadable document file URLs only (feeds the downloader)."""
+    return [
+        candidate["url"]
+        for candidate in extract_document_candidates(html, base_url)
+        if is_document_url(candidate["url"])
+    ]
 
 
 def is_document_url(url: str) -> bool:
     parsed = urlparse(url)
     suffix = Path(unquote(parsed.path)).suffix.lower()
     return suffix in DOCUMENT_EXTENSIONS
+
+
+def _file_type(url: str) -> str | None:
+    suffix = Path(unquote(urlparse(url).path)).suffix.lower().lstrip(".")
+    return suffix or None
+
+
+def _filename_label(url: str) -> str:
+    name = Path(unquote(urlparse(url).path)).name
+    return name or url
+
+
+def _score_document_link(text: str, url: str, is_file: bool) -> tuple[float, str] | None:
+    """Return (confidence, reason) or None if the link should be rejected."""
+    text_lower = text.lower()
+    url_lower = url.lower()
+    host = urlparse(url_lower).netloc
+
+    if any(domain in host for domain in SOCIAL_DOMAINS):
+        return None
+
+    # Reject nav/footer links unless the href is itself a direct file.
+    if not is_file and any(
+        keyword in text_lower for keyword in DOCUMENT_REJECT_KEYWORDS
+    ):
+        return None
+
+    haystack = f"{text_lower} {url_lower}"
+    has_strong = any(keyword in haystack for keyword in STRONG_DOCUMENT_KEYWORDS)
+    has_weak = any(keyword in haystack for keyword in WEAK_DOCUMENT_KEYWORDS)
+    is_generic = text_lower.strip() in GENERIC_LINK_TEXT
+
+    if is_file and has_strong:
+        return 0.95, "document file with solicitation keyword"
+    if is_file:
+        return 0.8, "direct document file"
+    if has_strong:
+        return 0.6, "solicitation keyword link"
+    if has_weak:
+        return 0.5, "document-like keyword link"
+    if is_generic:
+        return 0.3, "generic download/click link"
+    return None
 
 
 def extract_due_date(text: str) -> datetime | None:

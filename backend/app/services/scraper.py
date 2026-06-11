@@ -8,7 +8,13 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.models import Document, Opportunity
 from app.services.scrapers import GenericPublicAdapter, ScraperResult
+from app.services.scrapers.extraction_utils import (
+    extract_document_candidates,
+    is_document_url,
+)
 from app.services.scrapers.quality import assess_candidate
+
+DISCOVERY_USER_AGENT = "RFP-BidOS Public Scraper/0.2 (+document-discovery)"
 
 AUTH_REQUIRED_MESSAGE = (
     "This source requires credentials. Authenticated scraping is not enabled in this phase."
@@ -64,12 +70,16 @@ def scrape_source(source_config) -> dict:
                 opportunity = _create_opportunity(candidate, source_config)
                 session.add(opportunity)
                 session.flush()
-                _attach_document_urls(session, opportunity, candidate.document_urls)
+                doc_counts = _attach_document_urls(session, opportunity, candidate.document_urls)
+                result["documents_discovered"] += doc_counts["discovered"]
+                result["documents_skipped"] += doc_counts["skipped"]
                 result["created_count"] += 1
                 continue
 
             updated = _update_opportunity_if_safe(existing, candidate)
-            _attach_document_urls(session, existing, candidate.document_urls)
+            doc_counts = _attach_document_urls(session, existing, candidate.document_urls)
+            result["documents_discovered"] += doc_counts["discovered"]
+            result["documents_skipped"] += doc_counts["skipped"]
             if updated:
                 existing.updated_at = _utc_now()
                 session.add(existing)
@@ -106,6 +116,55 @@ def _scrape_candidates(
     except Exception as exc:
         result["errors"].append(f"Scraper failed: {exc}")
     return []
+
+
+def discover_documents_for_opportunity(opportunity_id: int, session) -> dict:
+    """Fetch an opportunity's detail/source page and discover document links.
+
+    Saves new pending Document records for direct file URLs (deduped by URL).
+    Does not download — that remains a separate step.
+    """
+    summary = {
+        "documents_discovered": 0,
+        "documents_skipped": 0,
+        "candidates": [],
+        "errors": [],
+    }
+    opportunity = session.get(Opportunity, opportunity_id)
+    if opportunity is None:
+        summary["errors"].append("Opportunity not found")
+        return summary
+
+    page_url = opportunity.source_url or opportunity.portal_url
+    if not page_url:
+        summary["errors"].append("Opportunity has no source_url or portal_url")
+        return summary
+
+    # If the opportunity URL is itself a direct file, nothing to crawl.
+    if is_document_url(page_url):
+        summary["errors"].append("Opportunity URL is a direct document, not a page to crawl")
+        return summary
+
+    try:
+        response = requests.get(
+            page_url,
+            headers={"User-Agent": DISCOVERY_USER_AGENT},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        summary["errors"].append(str(exc))
+        return summary
+
+    candidates = extract_document_candidates(response.text, page_url)
+    summary["candidates"] = candidates
+    file_urls = [c["url"] for c in candidates if is_document_url(c["url"])]
+
+    counts = _attach_document_urls(session, opportunity, file_urls)
+    session.commit()
+    summary["documents_discovered"] = counts["discovered"]
+    summary["documents_skipped"] = counts["skipped"]
+    return summary
 
 
 def _filter_candidates(
@@ -213,12 +272,20 @@ def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResu
     return updated
 
 
-def _attach_document_urls(session: Session, opportunity: Opportunity, document_urls: list[str]) -> None:
+def _attach_document_urls(
+    session: Session, opportunity: Opportunity, document_urls: list[str]
+) -> dict:
+    """Create pending Document records for discovered URLs, deduped by URL.
+
+    Returns {"discovered": n, "skipped": n}.
+    """
+    counts = {"discovered": 0, "skipped": 0}
     if opportunity.id is None:
-        return
+        return counts
     for url in document_urls:
         existing = session.exec(select(Document).where(Document.source_url == url)).first()
         if existing is not None:
+            counts["skipped"] += 1
             continue
         document = Document(
             opportunity_id=opportunity.id,
@@ -229,6 +296,8 @@ def _attach_document_urls(session: Session, opportunity: Opportunity, document_u
             parsed_status="Not Downloaded",
         )
         session.add(document)
+        counts["discovered"] += 1
+    return counts
 
 
 def _candidate_to_dict(candidate: ScraperResult) -> dict:
@@ -251,6 +320,8 @@ def _candidate_to_dict(candidate: ScraperResult) -> dict:
         "description": candidate.description,
         "document_urls": candidate.document_urls,
         "document_count": len(candidate.document_urls),
+        "document_candidates": candidate.document_candidates,
+        "document_candidate_count": len(candidate.document_candidates),
         "confidence_score": candidate.confidence_score,
         "quality_score": candidate.quality_score,
     }
@@ -271,6 +342,8 @@ def _empty_result() -> dict:
         "created_count": 0,
         "updated_count": 0,
         "skipped_duplicates": 0,
+        "documents_discovered": 0,
+        "documents_skipped": 0,
         "errors": [],
         "candidates": [],
     }

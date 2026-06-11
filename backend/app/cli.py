@@ -13,7 +13,11 @@ from app.services.parser import (
     parse_documents_for_opportunity,
 )
 from app.services.requirement_extractor import extract_requirements_with_local_ai
-from app.services.scraper import preview_source, scrape_source
+from app.services.scraper import (
+    discover_documents_for_opportunity,
+    preview_source,
+    scrape_source,
+)
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.scorer import score_opportunity_text
@@ -260,8 +264,13 @@ def preview_source_command(
         typer.echo(
             f"- {candidate['title']} | due: {candidate.get('due_date') or '-'} | "
             f"quality: {candidate.get('quality_score')} | "
-            f"documents: {candidate.get('document_count')}"
+            f"documents: {candidate.get('document_count')} | "
+            f"doc links: {candidate.get('document_candidate_count')}"
         )
+        for doc in (candidate.get("document_candidates") or [])[:3]:
+            typer.echo(
+                f"    doc [{doc['confidence_score']}] {doc['label'][:60]} -> {doc['url']}"
+            )
 
 
 @cli.command("preview-enabled-sources")
@@ -302,8 +311,13 @@ def preview_enabled_sources_command(
             typer.echo(
                 f"  - {candidate['title'][:90]} "
                 f"(quality: {candidate.get('quality_score')}, "
-                f"docs: {candidate.get('document_count')})"
+                f"docs: {candidate.get('document_count')}, "
+                f"doc links: {candidate.get('document_candidate_count')})"
             )
+            for doc in (candidate.get("document_candidates") or [])[:3]:
+                typer.echo(
+                    f"      doc [{doc['confidence_score']}] {doc['label'][:60]} -> {doc['url']}"
+                )
         reasons = result.get("filter_reasons") or {}
         if reasons:
             summary = ", ".join(f"{reason} x{count}" for reason, count in reasons.items())
@@ -353,6 +367,30 @@ def all_source_capabilities_command() -> None:
         return
     for source in sources:
         _echo_capabilities(get_source_scraper_capabilities(source))
+
+
+@cli.command("discover-documents")
+def discover_documents_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        title = opportunity.title
+        result = discover_documents_for_opportunity(opportunity_id, session)
+
+    typer.echo(
+        f"{title}: {result['documents_discovered']} new document links, "
+        f"{result['documents_skipped']} already known, "
+        f"{len(result['candidates'])} candidates scanned"
+    )
+    for candidate in result["candidates"][:10]:
+        typer.echo(
+            f"  - [{candidate['confidence_score']}] {candidate['label'][:70]} "
+            f"({candidate.get('file_type') or 'link'}) {candidate['url']}"
+        )
+    if result["errors"]:
+        typer.echo(f"  errors: {'; '.join(result['errors'])}")
 
 
 @cli.command("download-documents")
@@ -551,6 +589,8 @@ def _echo_scrape_result(source_name: str, result: dict) -> None:
         f"{result['created_count']} created, "
         f"{result['updated_count']} updated, "
         f"{result['skipped_duplicates']} skipped duplicates, "
+        f"{result.get('documents_discovered', 0)} docs discovered, "
+        f"{result.get('documents_skipped', 0)} docs skipped, "
         f"{len(result['errors'])} errors"
     )
     reasons = result.get("filter_reasons") or {}
