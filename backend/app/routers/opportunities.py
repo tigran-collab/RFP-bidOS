@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from sqlmodel import Session, select
@@ -12,8 +12,13 @@ from app.schemas import (
     OpportunityUpdate,
     RequirementRead,
 )
+from app.services.scorer import score_opportunity_text
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @router.get("", response_model=list[OpportunityRead])
@@ -50,12 +55,32 @@ def update_opportunity(opportunity_id: int, payload: OpportunityUpdate) -> Oppor
 
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(opportunity, field, value)
-        opportunity.updated_at = datetime.utcnow()
+        opportunity.updated_at = utc_now()
 
         session.add(opportunity)
         session.commit()
         session.refresh(opportunity)
         return opportunity
+
+
+@router.post("/{opportunity_id}/score")
+def score_opportunity(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        scoring_result = score_opportunity_text(opportunity)
+        opportunity.bid_score = scoring_result["score"]
+        opportunity.bid_decision = scoring_result["decision"]
+        opportunity.bid_reason = scoring_result["reason"]
+        opportunity.updated_at = utc_now()
+
+        session.add(opportunity)
+        session.commit()
+        session.refresh(opportunity)
+
+        return {"scoring_result": scoring_result, "opportunity": opportunity}
 
 
 @router.delete("/{opportunity_id}")

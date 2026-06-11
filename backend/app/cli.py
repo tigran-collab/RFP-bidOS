@@ -1,10 +1,17 @@
+from datetime import UTC, datetime
+
 import typer
 from sqlmodel import Session, select
 
 from app.db import engine, init_db
 from app.models import Opportunity
+from app.services.scorer import score_opportunity_text
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @cli.command("init-db")
@@ -77,6 +84,46 @@ def seed_demo() -> None:
         session.commit()
 
     typer.echo(f"Demo seed complete: {created} opportunities created")
+
+
+@cli.command("score-opportunity")
+def score_opportunity(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        scoring_result = score_opportunity_text(opportunity)
+        opportunity.bid_score = scoring_result["score"]
+        opportunity.bid_decision = scoring_result["decision"]
+        opportunity.bid_reason = scoring_result["reason"]
+        opportunity.updated_at = utc_now()
+
+        session.add(opportunity)
+        session.commit()
+
+        typer.echo(f"Score: {scoring_result['score']}")
+        typer.echo(f"Decision: {scoring_result['decision']}")
+        typer.echo(f"Reason: {scoring_result['reason']}")
+
+
+@cli.command("score-all-opportunities")
+def score_all_opportunities() -> None:
+    with Session(engine) as session:
+        opportunities = list(session.exec(select(Opportunity)).all())
+        for opportunity in opportunities:
+            scoring_result = score_opportunity_text(opportunity)
+            opportunity.bid_score = scoring_result["score"]
+            opportunity.bid_decision = scoring_result["decision"]
+            opportunity.bid_reason = scoring_result["reason"]
+            opportunity.updated_at = utc_now()
+            session.add(opportunity)
+            typer.echo(
+                f"{opportunity.title}: {scoring_result['decision']} "
+                f"({scoring_result['score']})"
+            )
+        session.commit()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env
 python -m app.cli init-db
+python -m app.cli score-opportunity 1
+python -m app.cli score-all-opportunities
 uvicorn app.main:app --reload
 ```
 
@@ -30,6 +32,13 @@ Backend:
 cd backend
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload
+```
+
+Scoring:
+
+```powershell
+python -m app.cli score-opportunity 1
+python -m app.cli score-all-opportunities
 ```
 
 Frontend:

@@ -121,6 +121,25 @@ h2 {
   text-decoration: underline;
 }
 
+.page-actions {
+  margin: 0 0 1rem;
+}
+
+.primary-button {
+  border: 1px solid #0f5e9c;
+  border-radius: 6px;
+  background: #0f5e9c;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0.55rem 0.85rem;
+  font-weight: 700;
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;

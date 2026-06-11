@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getOpportunity } from "../api.js";
+import { getOpportunity, scoreOpportunity } from "../api.js";
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
 
@@ -34,6 +34,7 @@ function DetailRow({ label, value }) {
 export default function OpportunityDetail({ opportunityId }) {
   const [opportunity, setOpportunity] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [scoring, setScoring] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -58,6 +59,19 @@ export default function OpportunityDetail({ opportunityId }) {
     loadOpportunity();
   }, [opportunityId]);
 
+  async function runScore() {
+    try {
+      setScoring(true);
+      const result = await scoreOpportunity(opportunityId);
+      setOpportunity(result.opportunity);
+      setError("");
+    } catch {
+      setError("Failed to score opportunity. Is the backend running?");
+    } finally {
+      setScoring(false);
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -69,6 +83,16 @@ export default function OpportunityDetail({ opportunityId }) {
   return (
     <section>
       <h1>{opportunity.title}</h1>
+      <div className="page-actions">
+        <button
+          className="primary-button"
+          type="button"
+          disabled={scoring}
+          onClick={runScore}
+        >
+          {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
+        </button>
+      </div>
       <dl className="detail-grid">
         <DetailRow label="Title" value={opportunity.title} />
         <DetailRow label="Agency" value={opportunity.agency} />
