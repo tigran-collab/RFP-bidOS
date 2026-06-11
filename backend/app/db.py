@@ -92,6 +92,8 @@ def _ensure_opportunity_logistics_columns() -> None:
         "deadline_risk": "VARCHAR",
         "logistics_confidence_score": "FLOAT",
         "logistics_notes": "VARCHAR",
+        "description": "VARCHAR",
+        "notes": "VARCHAR",
     }
     with Session(engine) as session:
         existing_columns = {

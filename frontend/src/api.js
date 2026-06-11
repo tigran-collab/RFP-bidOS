@@ -76,6 +76,18 @@ export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }
 
+export function createOpportunity(payload) {
+  return jsonRequest("/opportunities", payload, "POST");
+}
+
+export function updateOpportunity(id, payload) {
+  return jsonRequest(`/opportunities/${id}`, payload, "PATCH");
+}
+
+export function attachManualDocumentUrl(id, url, label) {
+  return jsonRequest(`/opportunities/${id}/documents/manual-url`, { url, label }, "POST");
+}
+
 export function getOpportunityDocuments(id) {
   return request(`/opportunities/${id}/documents`);
 }

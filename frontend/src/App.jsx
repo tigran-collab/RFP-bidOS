@@ -4,6 +4,7 @@ import Layout from "./components/Layout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import OpportunityDetail from "./pages/OpportunityDetail.jsx";
 import Opportunities from "./pages/Opportunities.jsx";
+import NewOpportunity from "./pages/NewOpportunity.jsx";
 import ReviewQueue from "./pages/ReviewQueue.jsx";
 import Scraper from "./pages/Scraper.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -11,6 +12,7 @@ import Settings from "./pages/Settings.jsx";
 const pages = {
   dashboard: Dashboard,
   opportunities: Opportunities,
+  newOpportunity: NewOpportunity,
   reviewQueue: ReviewQueue,
   opportunityDetail: OpportunityDetail,
   scraper: Scraper,

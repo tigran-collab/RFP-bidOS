@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   aiEvaluateOpportunity,
+  attachManualDocumentUrl,
   discoverOpportunityDocuments,
   downloadOpportunityDocuments,
   extractOpportunityLogistics,
@@ -15,8 +16,40 @@ import {
   runLogisticsQA,
   runPursuitPrep,
   scoreOpportunity,
+  updateOpportunity,
 } from "../api.js";
+import OpportunityFields, {
+  buildOpportunityPayload,
+} from "../components/OpportunityFields.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
+
+function toEditValues(o) {
+  const datePart = (value) => (value ? value.slice(0, 10) : "");
+  return {
+    title: o.title || "",
+    agency: o.agency || "",
+    solicitation_number: o.solicitation_number || "",
+    source_url: o.source_url || "",
+    portal_url: o.portal_url || "",
+    location: o.location || "",
+    service_type: o.service_type || "",
+    contract_type: o.contract_type || "",
+    estimated_value: o.estimated_value ?? "",
+    due_date: datePart(o.due_date),
+    q_and_a_deadline: datePart(o.q_and_a_deadline),
+    pre_bid_date: datePart(o.pre_bid_date),
+    pre_bid_mandatory: Boolean(o.pre_bid_mandatory),
+    submission_method: o.submission_method || "",
+    submission_portal: o.submission_portal || "",
+    required_forms_summary: o.required_forms_summary || "",
+    review_status: o.review_status || "New",
+    priority: o.priority || "",
+    next_action: o.next_action || "",
+    description: o.description || "",
+    notes: o.notes || "",
+    review_notes: o.review_notes || "",
+  };
+}
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
 
@@ -89,6 +122,12 @@ export default function OpportunityDetail({ opportunityId }) {
   const [extractingLogistics, setExtractingLogistics] = useState(false);
   const [runningQA, setRunningQA] = useState(false);
   const [logisticsQA, setLogisticsQA] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editValues, setEditValues] = useState({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [docUrl, setDocUrl] = useState("");
+  const [docLabel, setDocLabel] = useState("");
+  const [attachingDoc, setAttachingDoc] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -171,6 +210,62 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to run pursuit prep. Is the backend running?");
     } finally {
       setPreparing(false);
+    }
+  }
+
+  function startEdit() {
+    setEditValues(toEditValues(opportunity));
+    setEditing(true);
+    setActionMessage("");
+    setActionError("");
+  }
+
+  function onEditChange(field, value) {
+    setEditValues((current) => ({ ...current, [field]: value }));
+  }
+
+  async function saveEdit() {
+    if (!editValues.title || !editValues.title.trim()) {
+      setActionError("Title is required.");
+      return;
+    }
+    try {
+      setSavingEdit(true);
+      const payload = buildOpportunityPayload(editValues);
+      const updated = await updateOpportunity(opportunityId, payload);
+      setOpportunity(updated);
+      setEditing(false);
+      setActionMessage("Opportunity updated.");
+      setActionError("");
+    } catch (err) {
+      setActionError(err.message || "Failed to update opportunity.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function attachDoc() {
+    const url = docUrl.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      setActionError("Document URL must start with http:// or https://");
+      return;
+    }
+    try {
+      setAttachingDoc(true);
+      const result = await attachManualDocumentUrl(opportunityId, url, docLabel || null);
+      setDocuments(await getOpportunityDocuments(opportunityId));
+      setDocUrl("");
+      setDocLabel("");
+      setActionMessage(
+        result.status === "exists"
+          ? "Document URL was already attached."
+          : "Document URL attached (pending download).",
+      );
+      setActionError("");
+    } catch (err) {
+      setActionError(err.message || "Failed to attach document URL.");
+    } finally {
+      setAttachingDoc(false);
     }
   }
 
@@ -323,6 +418,14 @@ export default function OpportunityDetail({ opportunityId }) {
       <h1>{opportunity.title}</h1>
       <div className="page-actions">
         <button
+          className="secondary-button"
+          type="button"
+          disabled={busy || savingEdit}
+          onClick={editing ? () => setEditing(false) : startEdit}
+        >
+          {editing ? "Cancel Edit" : "Edit Opportunity"}
+        </button>
+        <button
           className="primary-button"
           type="button"
           disabled={busy}
@@ -397,6 +500,30 @@ export default function OpportunityDetail({ opportunityId }) {
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
       {actionError ? <p className="error-text">{actionError}</p> : null}
+      {editing ? (
+        <div className="edit-panel">
+          <h2>Edit Opportunity</h2>
+          <OpportunityFields values={editValues} onChange={onEditChange} />
+          <div className="page-actions">
+            <button
+              className="primary-button"
+              type="button"
+              disabled={savingEdit}
+              onClick={saveEdit}
+            >
+              {savingEdit ? "Saving..." : "Save Changes"}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={savingEdit}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
       {pursuitResult ? (
         <div className="pursuit-result">
           <h3>
@@ -585,6 +712,28 @@ export default function OpportunityDetail({ opportunityId }) {
         </table>
       )}
       <h2>Documents ({documents.length})</h2>
+      <div className="manual-doc-row">
+        <input
+          type="text"
+          value={docUrl}
+          placeholder="https://example.gov/file.pdf"
+          onChange={(event) => setDocUrl(event.target.value)}
+        />
+        <input
+          type="text"
+          value={docLabel}
+          placeholder="Label (optional)"
+          onChange={(event) => setDocLabel(event.target.value)}
+        />
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={attachingDoc || !docUrl.trim()}
+          onClick={attachDoc}
+        >
+          {attachingDoc ? "Attaching..." : "Attach Document URL"}
+        </button>
+      </div>
       {!documents.length ? (
         <p>
           No documents found. Use Discover Documents to find document links on the

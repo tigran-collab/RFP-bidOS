@@ -170,6 +170,21 @@ Notes:
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Manual Opportunity Entry
+
+Use manual entry for BidNet, PlanetBids, emails, PDFs, screenshots, and portals that do not scrape cleanly. Manually created opportunities default to `source = "Manual"` and `review_status = "New"`, and appear in the dashboard and review queue alongside scraped ones.
+
+Manual document URLs can be attached to an opportunity, then downloaded, parsed, evaluated, and processed through pursuit prep like any other document. **Manual entry does not submit anything to any portal.**
+
+```powershell
+cd backend
+python -m app.cli add-opportunity --title "Manual Test Security RFP" --agency "Test Agency" --source-url "https://example.gov/rfp" --due-date 2099-01-01
+python -m app.cli update-opportunity 1 --review-status Pursue --priority High --next-action "Download Documents"
+python -m app.cli attach-document-url 1 --url "https://example.gov/test.pdf" --label "Manual RFP document"
+```
+
+API: `POST /opportunities` (create), `PATCH /opportunities/{id}` (edit — only supplied fields are changed), and `POST /opportunities/{id}/documents/manual-url` (attach a document URL). The frontend has a **New Opportunity** page, an **Edit Opportunity** panel on the detail page, and a manual document URL input.
+
 ## Bid Logistics
 
 The app extracts critical bid logistics — proposal due date, Q&A deadline, pre-bid meeting date and whether it is mandatory, submission method/portal, required forms, and deadline risk — from parsed document text and opportunity metadata using deterministic regex/heuristics (no AI required, no network).

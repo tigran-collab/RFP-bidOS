@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, select
@@ -12,6 +14,7 @@ from app.schemas import (
     OpportunityRead,
     ExtractLogisticsByStatusRequest,
     LogisticsQAByStatusRequest,
+    ManualDocumentUrlRequest,
     OpportunityReviewUpdate,
     OpportunityUpdate,
     PursuitPrepByStatusRequest,
@@ -178,7 +181,15 @@ def get_opportunity(opportunity_id: int) -> Opportunity:
 
 @router.post("", response_model=OpportunityRead, status_code=201)
 def create_opportunity(payload: OpportunityCreate) -> Opportunity:
-    opportunity = Opportunity(**payload.model_dump())
+    data = payload.model_dump()
+    # Manual entry: default the source so these are distinguishable from scraped.
+    if not data.get("source"):
+        data["source"] = "Manual"
+    if not data.get("review_status"):
+        data["review_status"] = "New"
+    opportunity = Opportunity(**data)
+    opportunity.created_at = utc_now()
+    opportunity.updated_at = utc_now()
     with Session(engine) as session:
         session.add(opportunity)
         session.commit()
@@ -338,6 +349,53 @@ def discover_opportunity_documents(opportunity_id: int) -> dict:
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
         return discover_documents_for_opportunity(opportunity_id, session)
+
+
+@router.post("/{opportunity_id}/documents/manual-url")
+def attach_manual_document_url(opportunity_id: int, payload: ManualDocumentUrlRequest) -> dict:
+    url = (payload.url or "").strip()
+    if not (url.lower().startswith("http://") or url.lower().startswith("https://")):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        existing = session.exec(
+            select(Document).where(
+                Document.opportunity_id == opportunity_id,
+                Document.source_url == url,
+            )
+        ).first()
+        if existing is not None:
+            return {
+                "status": "exists",
+                "document_id": existing.id,
+                "url": url,
+                "filename": existing.filename,
+            }
+
+        suffix = Path(unquote(urlparse(url).path)).suffix.lower().lstrip(".") or None
+        filename = payload.label or Path(unquote(urlparse(url).path)).name or "document"
+        document = Document(
+            opportunity_id=opportunity_id,
+            filename=filename,
+            path="",
+            file_type=suffix,
+            source_url=url,
+            parsed_status="Not Downloaded",
+        )
+        session.add(document)
+        session.commit()
+        session.refresh(document)
+        return {
+            "status": "created",
+            "document_id": document.id,
+            "url": url,
+            "filename": document.filename,
+            "file_type": document.file_type,
+        }
 
 
 @router.post("/{opportunity_id}/download-documents")

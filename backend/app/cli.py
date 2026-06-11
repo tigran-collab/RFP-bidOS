@@ -1,10 +1,13 @@
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import typer
 from sqlmodel import Session, select
 
 from app.db import engine, init_db
-from app.models import Opportunity, ScrapeRun, SourceConfig
+from app.models import Document, Opportunity, ScrapeRun, SourceConfig
+from app.schemas import OpportunityCreate, OpportunityUpdate
 from app.services.ai_evaluator import evaluate_opportunity_with_local_ai
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import (
@@ -186,6 +189,190 @@ def seed_sources_command() -> None:
         f"{result['skipped_existing']} already present, "
         f"{result['total_curated']} curated total"
     )
+
+
+def _parse_cli_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    raise typer.BadParameter(f"Could not parse date: {value} (use YYYY-MM-DD)")
+
+
+@cli.command("add-opportunity")
+def add_opportunity_command(
+    title: str = typer.Option(..., "--title", help="Opportunity title (required)"),
+    agency: str = typer.Option(None, "--agency"),
+    solicitation_number: str = typer.Option(None, "--solicitation-number"),
+    source: str = typer.Option(None, "--source"),
+    source_url: str = typer.Option(None, "--source-url"),
+    portal_url: str = typer.Option(None, "--portal-url"),
+    location: str = typer.Option(None, "--location"),
+    service_type: str = typer.Option(None, "--service-type"),
+    contract_type: str = typer.Option(None, "--contract-type"),
+    estimated_value: float = typer.Option(None, "--estimated-value"),
+    due_date: str = typer.Option(None, "--due-date", help="YYYY-MM-DD"),
+    q_and_a_deadline: str = typer.Option(None, "--q-and-a-deadline", help="YYYY-MM-DD"),
+    pre_bid_date: str = typer.Option(None, "--pre-bid-date", help="YYYY-MM-DD"),
+    submission_method: str = typer.Option(None, "--submission-method"),
+    submission_portal: str = typer.Option(None, "--submission-portal"),
+    description: str = typer.Option(None, "--description"),
+    notes: str = typer.Option(None, "--notes"),
+    review_status: str = typer.Option(None, "--review-status"),
+    priority: str = typer.Option(None, "--priority"),
+    next_action: str = typer.Option(None, "--next-action"),
+) -> None:
+    init_db()
+    payload = OpportunityCreate(
+        title=title,
+        agency=agency,
+        solicitation_number=solicitation_number,
+        source=source or "Manual",
+        source_url=source_url,
+        portal_url=portal_url,
+        location=location,
+        service_type=service_type,
+        contract_type=contract_type,
+        estimated_value=estimated_value,
+        due_date=_parse_cli_date(due_date),
+        q_and_a_deadline=_parse_cli_date(q_and_a_deadline),
+        pre_bid_date=_parse_cli_date(pre_bid_date),
+        submission_method=submission_method,
+        submission_portal=submission_portal,
+        description=description,
+        notes=notes,
+        review_status=review_status or "New",
+        priority=priority,
+        next_action=next_action,
+    )
+    opportunity = Opportunity(**payload.model_dump())
+    opportunity.created_at = utc_now()
+    opportunity.updated_at = utc_now()
+    with Session(engine) as session:
+        session.add(opportunity)
+        session.commit()
+        session.refresh(opportunity)
+        typer.echo(
+            f"Created opportunity [{opportunity.id}] {opportunity.title} "
+            f"(source={opportunity.source}, review={opportunity.review_status})"
+        )
+
+
+@cli.command("update-opportunity")
+def update_opportunity_command(
+    opportunity_id: int,
+    title: str = typer.Option(None, "--title"),
+    agency: str = typer.Option(None, "--agency"),
+    solicitation_number: str = typer.Option(None, "--solicitation-number"),
+    source_url: str = typer.Option(None, "--source-url"),
+    portal_url: str = typer.Option(None, "--portal-url"),
+    location: str = typer.Option(None, "--location"),
+    service_type: str = typer.Option(None, "--service-type"),
+    contract_type: str = typer.Option(None, "--contract-type"),
+    estimated_value: float = typer.Option(None, "--estimated-value"),
+    due_date: str = typer.Option(None, "--due-date", help="YYYY-MM-DD"),
+    q_and_a_deadline: str = typer.Option(None, "--q-and-a-deadline", help="YYYY-MM-DD"),
+    pre_bid_date: str = typer.Option(None, "--pre-bid-date", help="YYYY-MM-DD"),
+    submission_method: str = typer.Option(None, "--submission-method"),
+    submission_portal: str = typer.Option(None, "--submission-portal"),
+    description: str = typer.Option(None, "--description"),
+    notes: str = typer.Option(None, "--notes"),
+    review_status: str = typer.Option(None, "--review-status"),
+    priority: str = typer.Option(None, "--priority"),
+    next_action: str = typer.Option(None, "--next-action"),
+    review_notes: str = typer.Option(None, "--review-notes"),
+) -> None:
+    raw = {
+        "title": title,
+        "agency": agency,
+        "solicitation_number": solicitation_number,
+        "source_url": source_url,
+        "portal_url": portal_url,
+        "location": location,
+        "service_type": service_type,
+        "contract_type": contract_type,
+        "estimated_value": estimated_value,
+        "due_date": _parse_cli_date(due_date),
+        "q_and_a_deadline": _parse_cli_date(q_and_a_deadline),
+        "pre_bid_date": _parse_cli_date(pre_bid_date),
+        "submission_method": submission_method,
+        "submission_portal": submission_portal,
+        "description": description,
+        "notes": notes,
+        "review_status": review_status,
+        "priority": priority,
+        "next_action": next_action,
+        "review_notes": review_notes,
+    }
+    provided = {key: value for key, value in raw.items() if value is not None}
+    if not provided:
+        typer.echo("No fields provided to update", err=True)
+        raise typer.Exit(code=1)
+
+    # Validate choice fields through the schema.
+    OpportunityUpdate(**provided)
+
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        for key, value in provided.items():
+            setattr(opportunity, key, value)
+        opportunity.updated_at = utc_now()
+        session.add(opportunity)
+        session.commit()
+        session.refresh(opportunity)
+        typer.echo(
+            f"Updated opportunity [{opportunity.id}] {opportunity.title} "
+            f"({len(provided)} field(s) changed; review={opportunity.review_status})"
+        )
+
+
+@cli.command("attach-document-url")
+def attach_document_url_command(
+    opportunity_id: int,
+    url: str = typer.Option(..., "--url", help="Document URL (http/https)"),
+    label: str = typer.Option(None, "--label", help="Document label"),
+) -> None:
+    clean = (url or "").strip()
+    if not (clean.lower().startswith("http://") or clean.lower().startswith("https://")):
+        typer.echo("URL must start with http:// or https://", err=True)
+        raise typer.Exit(code=1)
+
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        existing = session.exec(
+            select(Document).where(
+                Document.opportunity_id == opportunity_id,
+                Document.source_url == clean,
+            )
+        ).first()
+        if existing is not None:
+            typer.echo(f"Document URL already attached (document {existing.id})")
+            return
+        suffix = Path(unquote(urlparse(clean).path)).suffix.lower().lstrip(".") or None
+        filename = label or Path(unquote(urlparse(clean).path)).name or "document"
+        document = Document(
+            opportunity_id=opportunity_id,
+            filename=filename,
+            path="",
+            file_type=suffix,
+            source_url=clean,
+            parsed_status="Not Downloaded",
+        )
+        session.add(document)
+        session.commit()
+        session.refresh(document)
+        typer.echo(
+            f"Attached document [{document.id}] {document.filename} to opportunity {opportunity_id}"
+        )
 
 
 @cli.command("score-opportunity")

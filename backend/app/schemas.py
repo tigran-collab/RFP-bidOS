@@ -22,6 +22,8 @@ class OpportunityCreate(BaseModel):
     service_type: str | None = None
     contract_type: str | None = None
     estimated_value: float | None = None
+    description: str | None = None
+    notes: str | None = None
     bid_decision: str | None = None
     bid_score: float | None = None
     bid_reason: str | None = None
@@ -43,6 +45,21 @@ class OpportunityCreate(BaseModel):
     deadline_risk: str | None = None
     logistics_confidence_score: float | None = None
     logistics_notes: str | None = None
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_review_status(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *REVIEW_STATUS_CHOICES}, "review_status")
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *PRIORITY_CHOICES}, "priority")
+
+    @field_validator("next_action")
+    @classmethod
+    def validate_next_action(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *NEXT_ACTION_CHOICES}, "next_action")
 
 
 REVIEW_STATUS_CHOICES = {
@@ -133,6 +150,8 @@ class OpportunityUpdate(BaseModel):
     service_type: str | None = None
     contract_type: str | None = None
     estimated_value: float | None = None
+    description: str | None = None
+    notes: str | None = None
     bid_decision: str | None = None
     bid_score: float | None = None
     bid_reason: str | None = None
@@ -153,6 +172,28 @@ class OpportunityUpdate(BaseModel):
     deadline_risk: str | None = None
     logistics_confidence_score: float | None = None
     logistics_notes: str | None = None
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_review_status(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *REVIEW_STATUS_CHOICES}, "review_status")
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *PRIORITY_CHOICES}, "priority")
+
+    @field_validator("next_action")
+    @classmethod
+    def validate_next_action(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *NEXT_ACTION_CHOICES}, "next_action")
+
+
+class ManualDocumentUrlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    label: str | None = None
 
 
 class OpportunityRead(OpportunityCreate):
