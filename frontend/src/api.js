@@ -28,6 +28,10 @@ export function getHealth() {
   return request("/health");
 }
 
+export function getOperationsDashboard() {
+  return request("/dashboard/operations");
+}
+
 export function getOpportunities() {
   return request("/opportunities");
 }

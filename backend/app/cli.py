@@ -20,6 +20,7 @@ from app.services.scraper import (
 )
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
+from app.services.dashboard import get_operations_dashboard
 from app.services.pursuit_workflow import (
     run_pursuit_prep,
     run_pursuit_prep_for_status,
@@ -218,6 +219,62 @@ def score_all_opportunities() -> None:
                 f"({scoring_result['score']})"
             )
         session.commit()
+
+
+@cli.command("dashboard")
+def dashboard_command() -> None:
+    """Print a concise operations dashboard."""
+    with Session(engine) as session:
+        data = get_operations_dashboard(session)
+
+    counts = data["counts"]
+    typer.echo("== Counts ==")
+    typer.echo(
+        f"  total={counts['total_opportunities']} | new={counts['new']} | "
+        f"needs_review={counts['needs_review']} | pursue={counts['pursue']} | "
+        f"watchlist={counts['watchlist']} | do_not_pursue={counts['do_not_pursue']} | "
+        f"archived={counts['archived']}"
+    )
+    typer.echo(
+        f"  docs: pending_download={counts['documents_pending_download']} | "
+        f"downloaded={counts['documents_downloaded']} | "
+        f"parsed={counts['documents_parsed']} | "
+        f"parse_failed={counts['documents_parse_failed']} | "
+        f"requirements={counts['requirements_extracted']}"
+    )
+    typer.echo(
+        f"  sources: enabled={counts['sources_enabled']} | "
+        f"requiring_credentials={counts['sources_requiring_credentials']}"
+    )
+
+    typer.echo("\n== Upcoming Deadlines (next 30 days) ==")
+    deadlines = data["upcoming_deadlines"]
+    if not deadlines:
+        typer.echo("  (none)")
+    for item in deadlines[:10]:
+        due = (item["due_date"] or "")[:10]
+        typer.echo(
+            f"  [{item['id']}] {item['title'][:50]:50} | due {due} | "
+            f"{item['review_status']} | score {item['bid_score'] if item['bid_score'] is not None else '-'}"
+        )
+
+    typer.echo("\n== Top Opportunities ==")
+    for item in data["top_opportunities"][:5]:
+        typer.echo(
+            f"  [{item['id']}] {item['title'][:50]:50} | {item['review_status']} | "
+            f"score {item['bid_score'] if item['bid_score'] is not None else '-'} | "
+            f"AI {item['ai_recommendation'] or '-'}"
+        )
+
+    typer.echo("\n== Needs Action ==")
+    needs = data["needs_action"]
+    if not needs:
+        typer.echo("  (none)")
+    for item in needs[:10]:
+        typer.echo(
+            f"  [{item['id']}] {item['title'][:50]:50} | {item['reason']} "
+            f"-> {item['suggested_action'] or '-'}"
+        )
 
 
 REVIEW_STATUS_ORDER = {

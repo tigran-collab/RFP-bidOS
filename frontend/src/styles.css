@@ -244,6 +244,15 @@ h2 {
   font-size: 0.85rem;
 }
 
+.needs-action-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.needs-action-list li {
+  margin-bottom: 0.35rem;
+}
+
 .review-notes input {
   flex: 1;
   min-width: 100px;

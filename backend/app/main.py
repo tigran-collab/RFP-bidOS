@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import analysis, documents, opportunities, scraper, sources
+from app.routers import (
+    analysis,
+    dashboard,
+    documents,
+    opportunities,
+    scraper,
+    sources,
+)
 
 app = FastAPI(title="RFP BidOS")
 
@@ -18,6 +25,7 @@ app.include_router(documents.router)
 app.include_router(scraper.router)
 app.include_router(analysis.router)
 app.include_router(sources.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/")

@@ -170,6 +170,17 @@ Notes:
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Operations Dashboard
+
+The Operations Dashboard is the first page to check each day. It summarizes the review queue, upcoming deadlines (next 30 days), document status (pending download / downloaded / parsed / failed), requirement extraction status, a prioritized "Top Opportunities" list, a "Needs Action" list (what to do next per opportunity), and source health.
+
+```powershell
+cd backend
+python -m app.cli dashboard
+```
+
+API: `GET /dashboard/operations`. The frontend Dashboard page renders summary cards, upcoming deadlines, top opportunities, the needs-action list, and a source-health table.
+
 ## Review Queue
 
 Scraped opportunities enter a human-controlled review workflow:
