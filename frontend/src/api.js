@@ -25,6 +25,14 @@ export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }
 
+export function getOpportunityDocuments(id) {
+  return request(`/opportunities/${id}/documents`);
+}
+
+export function downloadOpportunityDocuments(id) {
+  return request(`/opportunities/${id}/download-documents`, { method: "POST" });
+}
+
 export function getSources() {
   return request("/sources");
 }

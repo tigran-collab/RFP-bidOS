@@ -12,6 +12,7 @@ from app.schemas import (
     OpportunityUpdate,
     RequirementRead,
 )
+from app.services.downloader import download_documents_for_opportunity
 from app.services.scorer import score_opportunity_text
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
@@ -102,6 +103,15 @@ def list_opportunity_documents(opportunity_id: int) -> list[Document]:
             raise HTTPException(status_code=404, detail="Opportunity not found")
         statement = select(Document).where(Document.opportunity_id == opportunity_id)
         return list(session.exec(statement).all())
+
+
+@router.post("/{opportunity_id}/download-documents")
+def download_opportunity_documents(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        return download_documents_for_opportunity(opportunity_id, session)
 
 
 @router.get("/{opportunity_id}/requirements", response_model=list[RequirementRead])

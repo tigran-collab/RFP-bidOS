@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 
 from app.db import engine, init_db
 from app.models import Opportunity, ScrapeRun, SourceConfig
+from app.services.downloader import download_documents_for_opportunity
 from app.services.scraper import scrape_source
 from app.services.scorer import score_opportunity_text
 
@@ -201,6 +202,46 @@ def scrape_enabled_sources_command() -> None:
         )
         if result["errors"]:
             typer.echo(f"{source.name} errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("download-documents")
+def download_documents_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        result = download_documents_for_opportunity(opportunity_id, session)
+
+    typer.echo(f"Downloaded: {result['downloaded_count']}")
+    typer.echo(f"Skipped: {result['skipped_count']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("download-all-documents")
+def download_all_documents_command() -> None:
+    total_downloaded = 0
+    total_skipped = 0
+    total_errors: list[str] = []
+
+    with Session(engine) as session:
+        opportunities = list(session.exec(select(Opportunity)).all())
+        for opportunity in opportunities:
+            result = download_documents_for_opportunity(opportunity.id, session)
+            total_downloaded += result["downloaded_count"]
+            total_skipped += result["skipped_count"]
+            total_errors.extend(result["errors"])
+            typer.echo(
+                f"{opportunity.title}: {result['downloaded_count']} downloaded, "
+                f"{result['skipped_count']} skipped"
+            )
+
+    typer.echo(
+        f"Summary: {total_downloaded} downloaded, "
+        f"{total_skipped} skipped, {len(total_errors)} errors"
+    )
 
 
 def run_scrape_for_source(source: SourceConfig) -> dict:

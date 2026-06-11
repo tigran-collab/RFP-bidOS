@@ -1,0 +1,131 @@
+The app now has database models, frontend API connection, rules-based scoring, and a basic public scraper foundation. Implement document downloading only.
+
+Goal:
+Add a safe deterministic downloader that can download RFP documents from known public document URLs, save them locally, hash them, and create Document records linked to Opportunities.
+
+Do not implement AI/LLM features yet.
+Do not parse PDFs yet.
+Do not implement OCR.
+Do not implement login scraping.
+Do not implement Playwright yet.
+Do not submit anything.
+Do not scrape aggressively.
+Do not recursively crawl sites.
+
+Backend requirements:
+
+1. Document model
+Use the existing Document model if present.
+Ensure it supports:
+- id
+- opportunity_id
+- filename
+- path
+- file_type
+- sha256
+- source_url
+- downloaded_at
+- parsed_status
+
+2. Create backend/app/services/downloader.py
+
+Implement:
+
+- is_downloadable_url(url: str) -> bool
+- safe_filename_from_url(url: str, fallback: str = "document") -> str
+- sha256_file(path: str) -> str
+- download_document(url: str, opportunity_id: int, session) -> dict
+- download_documents_for_opportunity(opportunity_id: int, session) -> dict
+
+Downloader behavior:
+- Use requests.
+- Timeout after 30 seconds.
+- Use normal User-Agent.
+- Only download if URL looks like a document:
+  - .pdf
+  - .doc
+  - .docx
+  - .xls
+  - .xlsx
+  - .csv
+  - .zip
+- Also allow response Content-Type for:
+  - application/pdf
+  - Word documents
+  - Excel documents
+  - zip files
+- Save files under:
+  data/downloads/opportunity_<id>/
+- Avoid unsafe filenames.
+- Avoid duplicates by sha256 and/or source_url.
+- Do not overwrite existing files unless identical.
+- Create a Document record after successful download.
+- Set parsed_status = "Not Parsed"
+- Return summary:
+  - downloaded_count
+  - skipped_count
+  - errors
+  - documents
+
+3. Opportunity source handling
+For now, use Opportunity.source_url as the candidate document URL if it looks downloadable.
+Do not crawl the whole portal.
+Do not follow unrelated links.
+If source_url is not downloadable, return skipped with reason.
+
+4. API routes
+Add:
+- POST /opportunities/{id}/download-documents
+- GET /opportunities/{id}/documents
+
+POST /opportunities/{id}/download-documents:
+- downloads files for one opportunity
+- returns downloader summary
+
+GET /opportunities/{id}/documents:
+- returns linked documents
+
+5. CLI commands
+Add:
+- python -m app.cli download-documents <opportunity_id>
+- python -m app.cli download-all-documents
+
+download-all-documents:
+- attempts document download for all opportunities
+- skips non-downloadable source URLs
+- prints summary
+
+6. Frontend
+On OpportunityDetail page:
+- Add a button: Download Documents
+- Show linked documents below opportunity details
+- Show filename, file type, parsed status, and source URL
+- Show a simple result message after download
+
+7. README
+Add document downloader instructions:
+Backend:
+python -m app.cli download-documents 1
+python -m app.cli download-all-documents
+
+Note:
+This phase only downloads direct public document URLs. It does not crawl portals, log in, use Playwright, or parse PDFs.
+
+8. Safety
+- No login scraping
+- No credential storage
+- No recursive crawling
+- No automated submission
+- No AI extraction
+- No OCR
+- No PDF parsing yet
+- No running uvicorn --reload as an automated long-running verification command inside Codex
+
+9. Checks
+Run:
+- python -m app.cli init-db
+- python -m app.cli seed-demo
+- python -m app.cli download-all-documents
+- npm.cmd run build
+
+Do not run uvicorn --reload inside Codex as a long-running check.
