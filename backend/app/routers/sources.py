@@ -5,9 +5,14 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import ScrapeRun, SourceConfig
-from app.schemas import SourceConfigCreate, SourceConfigRead, SourceConfigUpdate
+from app.schemas import (
+    ScraperCapabilitiesResponse,
+    SourceConfigCreate,
+    SourceConfigRead,
+    SourceConfigUpdate,
+)
 from app.services.scraper import preview_source, scrape_source
-from app.services.scrapers.bidnet_placeholder import get_scraper_capabilities
+from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.source_credentials import (
     get_source_auth_status,
     update_source_auth_status,
@@ -66,6 +71,15 @@ def scrape_enabled_sources() -> dict:
     return summary
 
 
+# Must be registered before /{source_id}/scraper-capabilities to avoid
+# FastAPI trying to coerce "scraper-capabilities" as an int path param.
+@router.get("/scraper-capabilities/all", response_model=list[ScraperCapabilitiesResponse])
+def get_all_source_scraper_capabilities() -> list[dict]:
+    with Session(engine) as session:
+        sources = list(session.exec(select(SourceConfig)).all())
+    return [get_source_scraper_capabilities(s) for s in sources]
+
+
 @router.post("/{source_id}/scrape")
 def scrape_source_by_id(source_id: int) -> dict:
     with Session(engine) as session:
@@ -107,20 +121,13 @@ def check_source_auth_status_by_id(source_id: int) -> dict:
         return result
 
 
-@router.get("/{source_id}/scraper-capabilities")
-def get_source_scraper_capabilities(source_id: int) -> dict:
+@router.get("/{source_id}/scraper-capabilities", response_model=ScraperCapabilitiesResponse)
+def get_source_scraper_capabilities_by_id(source_id: int) -> dict:
     with Session(engine) as session:
         source = session.get(SourceConfig, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="Source not found")
-    return get_scraper_capabilities(source)
-
-
-@router.get("/scraper-capabilities/all")
-def get_all_source_scraper_capabilities() -> list:
-    with Session(engine) as session:
-        sources = list(session.exec(select(SourceConfig)).all())
-    return [get_scraper_capabilities(s) for s in sources]
+    return get_source_scraper_capabilities(source)
 
 
 @router.patch("/{source_id}", response_model=SourceConfigRead)

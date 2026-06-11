@@ -119,18 +119,24 @@ Scraper limitations:
 - No automated submissions.
 - Extracted fields require human review.
 
-BidNet and other authenticated sources may be marked as requiring credentials, but authenticated scraping is not implemented in this phase. Credential handling should be added later through a proper secret store, not raw plaintext passwords.
+## Future Authenticated Sources / BidNet Placeholder
 
-Credential-aware source notes:
-
-- Public scraping is supported.
-- Authenticated scraping is not enabled yet.
-- BidNet can be marked as requiring credentials for future authenticated access.
-- Environment variables may be used later:
-  - `BIDNET_USERNAME`
-  - `BIDNET_PASSWORD`
-- Passwords are not stored in the database.
-- Do not commit credentials to git.
+- Public scraping is supported for generic public procurement pages.
+- Credential-aware source configuration exists: sources may be marked as requiring credentials, with credential type, username, and secret reference fields.
+- BidNet can be marked as requiring credentials for future authenticated access via the portal type and credential fields.
+- Authenticated scraping is intentionally disabled in this phase. The `BidNetPlaceholderAdapter` returns a controlled "not enabled" message and never performs login, credential submission, or scraping behind a login wall.
+- Passwords must not be committed or stored raw in the database.
+- Future authenticated access should use:
+  - A secure secret store (not plaintext environment variables in production).
+  - Review of the portal's terms of service.
+  - Rate-limit awareness and human-controlled execution.
+  - Explicit user confirmation before any credential submission.
+- Scraper capabilities can be checked per source:
+  ```powershell
+  python -m app.cli source-capabilities <source_id>
+  python -m app.cli all-source-capabilities
+  ```
+- API endpoint: `GET /sources/{id}/scraper-capabilities`
 
 ## Scope Notes
 

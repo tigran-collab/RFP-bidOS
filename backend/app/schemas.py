@@ -256,6 +256,16 @@ class OpportunityEvaluationRead(BaseModel):
     created_at: datetime
 
 
+class ScraperCapabilitiesResponse(BaseModel):
+    source_id: int
+    portal_type: str | None = None
+    supports_public_scrape: bool
+    supports_authenticated_scrape: bool
+    requires_credentials: bool
+    auth_status: str | None = None
+    message: str
+
+
 def _validate_choice(value: str | None, allowed: set[str | None], field_name: str) -> str | None:
     if value in allowed:
         return value

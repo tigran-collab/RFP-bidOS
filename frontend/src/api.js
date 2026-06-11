@@ -95,3 +95,7 @@ export function checkSourceAuthStatus(id) {
 export function scrapeEnabledSources() {
   return request("/sources/scrape-enabled", { method: "POST" });
 }
+
+export function getSourceScraperCapabilities(id) {
+  return request(`/sources/${id}/scraper-capabilities`);
+}

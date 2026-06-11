@@ -14,7 +14,7 @@ from app.services.parser import (
 )
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import preview_source, scrape_source
-from app.services.scrapers.bidnet_placeholder import get_scraper_capabilities
+from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.scorer import score_opportunity_text
 from app.services.source_credentials import update_source_auth_status
 
@@ -273,7 +273,7 @@ def source_capabilities_command(source_id: int) -> None:
         if source is None:
             typer.echo(f"Source not found: {source_id}", err=True)
             raise typer.Exit(code=1)
-    _echo_capabilities(get_scraper_capabilities(source))
+    _echo_capabilities(get_source_scraper_capabilities(source))
 
 
 @cli.command("all-source-capabilities")
@@ -284,7 +284,7 @@ def all_source_capabilities_command() -> None:
         typer.echo("No sources found")
         return
     for source in sources:
-        _echo_capabilities(get_scraper_capabilities(source))
+        _echo_capabilities(get_source_scraper_capabilities(source))
 
 
 @cli.command("download-documents")
@@ -510,15 +510,17 @@ def _scrape_summary(result: dict) -> str:
 
 
 def _echo_capabilities(caps: dict) -> None:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, caps["source_id"])
+        source_name = source.name if source else str(caps["source_id"])
     typer.echo(
-        f"{caps['source_name']}: portal={caps['portal_type'] or 'Unknown'}, "
-        f"public scraping={'yes' if caps['public_scraping_available'] else 'no'}, "
-        f"authenticated scraping={'yes' if caps['authenticated_scraping_available'] else 'not enabled'}"
+        f"{source_name}: portal={caps['portal_type'] or 'Unknown'}, "
+        f"requires credentials={caps['requires_credentials']}, "
+        f"auth status={caps['auth_status'] or '-'}, "
+        f"public scrape={'yes' if caps['supports_public_scrape'] else 'no'}, "
+        f"authenticated scrape={'yes' if caps['supports_authenticated_scrape'] else 'not enabled'}"
     )
-    if caps.get("authenticated_scraping_notice"):
-        typer.echo(f"  Notice: {caps['authenticated_scraping_notice']}")
-    if caps.get("auth_missing_fields"):
-        typer.echo(f"  Missing: {', '.join(caps['auth_missing_fields'])}")
+    typer.echo(f"  {caps['message']}")
 
 
 if __name__ == "__main__":

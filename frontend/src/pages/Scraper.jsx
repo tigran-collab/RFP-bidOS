@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   checkSourceAuthStatus,
+  getSourceScraperCapabilities,
   getSources,
   previewSource,
   scrapeEnabledSources,
@@ -55,7 +56,20 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
-function CapabilitiesNotice({ source, edit }) {
+function CapabilitiesNotice({ source, edit, capabilities }) {
+  // If we have a fetched capabilities object, use its message directly.
+  if (capabilities) {
+    if (!capabilities.supports_authenticated_scrape) {
+      return (
+        <p className="muted-text notice-text">
+          {capabilities.message}
+        </p>
+      );
+    }
+    return null;
+  }
+
+  // Fallback: derive from local state.
   const portalType = edit.portal_type || source.portal_type || "";
   const requiresCreds = Boolean(edit.requires_credentials);
 
@@ -63,7 +77,7 @@ function CapabilitiesNotice({ source, edit }) {
     return (
       <p className="muted-text notice-text">
         BidNet credentials can be configured here for future authenticated access.
-        Authenticated BidNet scraping is not enabled in this phase.
+        Authenticated scraping is not enabled in this phase.
       </p>
     );
   }
@@ -98,6 +112,7 @@ export default function Scraper() {
   const [savingSource, setSavingSource] = useState("");
   const [checkingAuth, setCheckingAuth] = useState("");
   const [authResults, setAuthResults] = useState({});
+  const [capabilities, setCapabilities] = useState({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -198,6 +213,15 @@ export default function Scraper() {
       setError("Failed to save credential settings.");
     } finally {
       setSavingSource("");
+    }
+  }
+
+  async function fetchCapabilities(source) {
+    try {
+      const result = await getSourceScraperCapabilities(source.id);
+      setCapabilities((current) => ({ ...current, [source.id]: result }));
+    } catch {
+      // Non-fatal — capabilities notice will fall back to local state.
     }
   }
 
@@ -345,7 +369,7 @@ export default function Scraper() {
                         updateSourceEdit(source.id, "credential_notes", event.target.value)
                       }
                     />
-                    <CapabilitiesNotice source={source} edit={edit} />
+                    <CapabilitiesNotice source={source} edit={edit} capabilities={capabilities[source.id]} />
                     {authResult?.missing_fields?.length ? (
                       <p className="error-text">{authResult.missing_fields.join("; ")}</p>
                     ) : null}
@@ -368,6 +392,13 @@ export default function Scraper() {
                       onClick={() => checkAuthStatus(source)}
                     >
                       {checkingAuth === String(source.id) ? "Checking..." : "Check Auth Status"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => fetchCapabilities(source)}
+                    >
+                      Capabilities
                     </button>
                     <button
                       className="secondary-button"

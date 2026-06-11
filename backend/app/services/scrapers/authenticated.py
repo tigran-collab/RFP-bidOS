@@ -14,11 +14,12 @@ class AuthenticatedScraperAdapter(Protocol):
         """
         ...
 
-    def scrape_authenticated(self, source_config) -> dict:
+    def scrape_authenticated(self, source_config) -> list[dict]:
         """
-        Returns a dict with keys:
-          supported: bool
-          message: str
-          records: list (empty when unsupported)
+        Returns a list of raw record dicts.
+        In this phase all implementations return an empty list with a
+        controlled unsupported message via check_auth_ready first.
+        Never performs network login, credential submission, or
+        scraping behind a login wall.
         """
         ...
