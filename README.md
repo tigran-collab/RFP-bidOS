@@ -77,11 +77,10 @@ python -m app.cli parse-opportunity-documents 1
 python -m app.cli parse-all-documents
 ```
 
-This phase only extracts embedded text from PDFs. It does not OCR scanned PDFs.
-
-Known issue: PyMuPDF/fitz may require dependency repair in the local virtual
-environment before PDF parsing works. If fitz cannot load, parser commands will
-leave the document marked as `Parse Failed` and return a clear error message.
+This phase only extracts embedded text from PDFs. `pypdf` is the default parser
+because it avoids native Windows DLL dependency issues. PyMuPDF/fitz is optional
+and used only as a fallback when available. OCR is not supported yet, so
+scanned or image-only PDFs may produce little or no text.
 
 Local AI evaluation:
 

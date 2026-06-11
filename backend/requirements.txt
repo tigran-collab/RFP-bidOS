@@ -7,6 +7,7 @@ python-dotenv
 typer
 requests
 beautifulsoup4
+pypdf
 playwright
 PyMuPDF
 pandas
