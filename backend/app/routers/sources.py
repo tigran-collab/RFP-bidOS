@@ -11,6 +11,7 @@ from app.schemas import (
     SourceConfigRead,
     SourceConfigUpdate,
 )
+from app.seed_sources import seed_real_sources
 from app.services.scraper import preview_source, scrape_source
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.source_credentials import (
@@ -69,6 +70,12 @@ def scrape_enabled_sources() -> dict:
         summary["results"].append({"source": source.name, **result})
 
     return summary
+
+
+@router.post("/seed")
+def seed_sources_route() -> dict:
+    with Session(engine) as session:
+        return seed_real_sources(session)
 
 
 # Must be registered before /{source_id}/scraper-capabilities to avoid

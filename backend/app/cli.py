@@ -14,6 +14,7 @@ from app.services.parser import (
 )
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import preview_source, scrape_source
+from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.scorer import score_opportunity_text
 from app.services.source_credentials import update_source_auth_status
@@ -155,6 +156,20 @@ def seed_demo() -> None:
     )
 
 
+@cli.command("seed-sources")
+def seed_sources_command() -> None:
+    """Seed curated real public procurement sources for CA, TX, NV, and AZ."""
+    init_db()
+    with Session(engine) as session:
+        result = seed_real_sources(session)
+    typer.echo(
+        f"Source seed complete: {result['created']} created, "
+        f"{result['updated']} updated, "
+        f"{result['skipped_existing']} already present, "
+        f"{result['total_curated']} curated total"
+    )
+
+
 @cli.command("score-opportunity")
 def score_opportunity(opportunity_id: int) -> None:
     with Session(engine) as session:
@@ -242,6 +257,42 @@ def preview_source_command(source_id: int) -> None:
             f"confidence: {candidate.get('confidence_score')} | "
             f"documents: {candidate.get('document_count')}"
         )
+
+
+@cli.command("preview-enabled-sources")
+def preview_enabled_sources_command(
+    detail_limit: int = typer.Option(3, help="Max detail pages fetched per source"),
+    top: int = typer.Option(5, help="Top candidate titles to print per source"),
+) -> None:
+    """Smoke-test all enabled sources without saving opportunities."""
+    with Session(engine) as session:
+        sources = list(
+            session.exec(select(SourceConfig).where(SourceConfig.enabled == True)).all()
+        )
+
+    if not sources:
+        typer.echo("No enabled sources to preview")
+        return
+
+    for source in sources:
+        try:
+            result = preview_source(source, detail_limit=detail_limit)
+        except Exception as exc:
+            typer.echo(f"{source.name}: preview failed ({exc})")
+            continue
+
+        typer.echo(
+            f"{source.name} [{source.state or '-'} | {source.portal_type or '-'}]: "
+            f"{result['records_found']} candidates, {len(result['errors'])} errors"
+        )
+        for candidate in result.get("candidates", [])[:top]:
+            typer.echo(
+                f"  - {candidate['title'][:90]} "
+                f"(confidence: {candidate.get('confidence_score')}, "
+                f"docs: {candidate.get('document_count')})"
+            )
+        if result["errors"]:
+            typer.echo(f"  errors: {'; '.join(result['errors'])}")
 
 
 @cli.command("check-source-auth")

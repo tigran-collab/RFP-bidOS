@@ -92,6 +92,7 @@ class SourceConfig(SQLModel, table=True):
     auth_status: str | None = "Not Configured"
     auth_last_checked_at: datetime | None = None
     portal_type: str | None = None
+    state: str | None = None
     last_scrape_at: datetime | None = None
     last_scrape_status: str | None = None
     last_scrape_summary: str | None = None

@@ -119,6 +119,25 @@ Scraper limitations:
 - No automated submissions.
 - Extracted fields require human review.
 
+## Real Source Seeding
+
+Seed curated real public procurement sources for California, Texas, Nevada, and Arizona, then smoke-test them:
+
+```powershell
+cd backend
+python -m app.cli seed-sources
+python -m app.cli preview-enabled-sources
+python -m app.cli scrape-enabled-sources
+```
+
+Notes:
+
+- Seeded sources are public pages only — no login is required or attempted.
+- Seeding is idempotent; rerunning `seed-sources` does not create duplicates.
+- JavaScript-heavy portals (Cal eProcure, Texas ESBD, Arizona Procurement Portal, SF City Partner) are seeded disabled with notes, since the HTML scraper gets limited results from them.
+- Government portal structures change frequently; scraper results always require human review.
+- Login-required sources are skipped cleanly until a future authenticated-source phase.
+
 ## Future Authenticated Sources / BidNet Placeholder
 
 - Public scraping is supported for generic public procurement pages.

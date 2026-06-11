@@ -7,6 +7,7 @@ import {
   previewSource,
   scrapeEnabledSources,
   scrapeSource,
+  seedSources,
   updateSource,
 } from "../api.js";
 
@@ -113,6 +114,7 @@ export default function Scraper() {
   const [checkingAuth, setCheckingAuth] = useState("");
   const [authResults, setAuthResults] = useState({});
   const [capabilities, setCapabilities] = useState({});
+  const [seeding, setSeeding] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -216,6 +218,23 @@ export default function Scraper() {
     }
   }
 
+  async function runSeedSources() {
+    try {
+      setSeeding(true);
+      const result = await seedSources();
+      await loadSources();
+      setMessage(
+        `Sources seeded: ${result.created} created, ${result.updated} updated, ` +
+          `${result.skipped_existing} already present`,
+      );
+      setError("");
+    } catch {
+      setError("Failed to seed sources.");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   async function fetchCapabilities(source) {
     try {
       const result = await getSourceScraperCapabilities(source.id);
@@ -256,6 +275,14 @@ export default function Scraper() {
         >
           {scraping === "enabled" ? "Scraping..." : "Scrape Enabled Sources"}
         </button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={seeding}
+          onClick={runSeedSources}
+        >
+          {seeding ? "Seeding..." : "Seed Sources"}
+        </button>
       </div>
       {message ? <p>{message}</p> : null}
       {error ? <p className="error-text">{error}</p> : null}
@@ -285,7 +312,10 @@ export default function Scraper() {
                 <td>
                   <strong>{source.name}</strong>
                   <div className="muted-text">{source.source_type}</div>
-                  <div className="muted-text">Portal: {displayPortal}</div>
+                  <div className="muted-text">
+                    Portal: {displayPortal}
+                    {source.state ? ` · ${source.state}` : ""}
+                  </div>
                 </td>
                 <td className="break-text">{source.base_url || ""}</td>
                 <td>{source.enabled ? "Yes" : "No"}</td>

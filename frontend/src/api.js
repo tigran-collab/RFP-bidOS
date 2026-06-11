@@ -99,3 +99,7 @@ export function scrapeEnabledSources() {
 export function getSourceScraperCapabilities(id) {
   return request(`/sources/${id}/scraper-capabilities`);
 }
+
+export function seedSources() {
+  return request("/sources/seed", { method: "POST" });
+}

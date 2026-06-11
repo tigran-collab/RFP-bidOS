@@ -120,6 +120,7 @@ class SourceConfigCreate(BaseModel):
     credential_notes: str | None = None
     auth_status: str | None = "Not Configured"
     portal_type: str | None = None
+    state: str | None = None
 
     @field_validator("credential_type")
     @classmethod
@@ -182,6 +183,7 @@ class SourceConfigUpdate(BaseModel):
     credential_notes: str | None = None
     auth_status: str | None = None
     portal_type: str | None = None
+    state: str | None = None
 
     @field_validator("credential_type")
     @classmethod

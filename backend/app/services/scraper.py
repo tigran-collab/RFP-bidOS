@@ -14,14 +14,14 @@ AUTH_REQUIRED_MESSAGE = (
 )
 
 
-def preview_source(source_config) -> dict:
+def preview_source(source_config, detail_limit: int | None = None) -> dict:
     result = _empty_result()
     skip_message = _auth_skip_message(source_config)
     if skip_message:
         result["errors"].append(skip_message)
         return result
 
-    candidates = _scrape_candidates(source_config, result)
+    candidates = _scrape_candidates(source_config, result, detail_limit=detail_limit)
     result["records_found"] = len(candidates)
     result["total_candidates_found"] = len(candidates)
     result["candidates"] = [_candidate_to_dict(candidate) for candidate in candidates]
@@ -69,13 +69,19 @@ def scrape_source(source_config) -> dict:
     return result
 
 
-def _scrape_candidates(source_config, result: dict) -> list[ScraperResult]:
+def _scrape_candidates(
+    source_config, result: dict, detail_limit: int | None = None
+) -> list[ScraperResult]:
     base_url = getattr(source_config, "base_url", None)
     if not base_url:
         result["errors"].append("Source has no base_url")
         return []
 
-    adapter = GenericPublicAdapter()
+    adapter = (
+        GenericPublicAdapter(detail_limit=detail_limit)
+        if detail_limit is not None
+        else GenericPublicAdapter()
+    )
     if not adapter.can_handle(source_config):
         result["errors"].append(f"Unsupported source type: {source_config.source_type}")
         return []
