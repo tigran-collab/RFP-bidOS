@@ -15,6 +15,7 @@ from app.services.parser import (
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import preview_source, scrape_source
 from app.services.scorer import score_opportunity_text
+from app.services.source_credentials import update_source_auth_status
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
 
@@ -107,7 +108,8 @@ def seed_demo() -> None:
             base_url="https://www.bidnetdirect.com",
             enabled=False,
             requires_credentials=True,
-            credential_type="future_secret_store",
+            credential_type="Future Secret Store",
+            credential_secret_ref="future:bidnet",
             credential_notes=(
                 "BidNet credentials will be added in a future authenticated-source phase."
             ),
@@ -134,6 +136,13 @@ def seed_demo() -> None:
             if existing is None:
                 session.add(source)
                 sources_created += 1
+            elif source.requires_credentials:
+                existing.requires_credentials = source.requires_credentials
+                existing.credential_type = source.credential_type
+                existing.credential_secret_ref = source.credential_secret_ref
+                existing.credential_notes = source.credential_notes
+                existing.auth_status = source.auth_status
+                session.add(existing)
         session.commit()
 
     typer.echo(
@@ -230,6 +239,28 @@ def preview_source_command(source_id: int) -> None:
             f"confidence: {candidate.get('confidence_score')} | "
             f"documents: {candidate.get('document_count')}"
         )
+
+
+@cli.command("check-source-auth")
+def check_source_auth_command(source_id: int) -> None:
+    with Session(engine) as session:
+        result = update_source_auth_status(source_id, session)
+        if result.get("error"):
+            typer.echo(result["error"], err=True)
+            raise typer.Exit(code=1)
+        _echo_auth_status(result)
+
+
+@cli.command("check-all-source-auth")
+def check_all_source_auth_command() -> None:
+    with Session(engine) as session:
+        sources = list(session.exec(select(SourceConfig)).all())
+        if not sources:
+            typer.echo("No sources found")
+            return
+        for source in sources:
+            result = update_source_auth_status(source.id, session)
+            _echo_auth_status(result)
 
 
 @cli.command("download-documents")
@@ -430,6 +461,18 @@ def _echo_scrape_result(source_name: str, result: dict) -> None:
     )
     if result["errors"]:
         typer.echo(f"{source_name} errors: {'; '.join(result['errors'])}")
+
+
+def _echo_auth_status(result: dict) -> None:
+    missing_fields = result.get("missing_fields") or []
+    typer.echo(
+        f"{result['source_name']}: "
+        f"requires credentials={result['requires_credentials']}, "
+        f"credential type={result.get('credential_type') or '-'}, "
+        f"auth status={result['auth_status']}"
+    )
+    if missing_fields:
+        typer.echo(f"{result['source_name']} missing: {', '.join(missing_fields)}")
 
 
 def _scrape_summary(result: dict) -> str:

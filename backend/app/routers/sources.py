@@ -7,6 +7,10 @@ from app.db import engine
 from app.models import ScrapeRun, SourceConfig
 from app.schemas import SourceConfigCreate, SourceConfigRead, SourceConfigUpdate
 from app.services.scraper import preview_source, scrape_source
+from app.services.source_credentials import (
+    get_source_auth_status,
+    update_source_auth_status,
+)
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -81,6 +85,25 @@ def preview_source_by_id(source_id: int) -> dict:
             raise HTTPException(status_code=404, detail="Source not found")
 
     return preview_source(source)
+
+
+@router.get("/{source_id}/auth-status")
+def get_source_auth_status_by_id(source_id: int) -> dict:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+    return get_source_auth_status(source)
+
+
+@router.post("/{source_id}/auth-status/check")
+def check_source_auth_status_by_id(source_id: int) -> dict:
+    with Session(engine) as session:
+        result = update_source_auth_status(source_id, session)
+        if result.get("error"):
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
 
 
 @router.patch("/{source_id}", response_model=SourceConfigRead)

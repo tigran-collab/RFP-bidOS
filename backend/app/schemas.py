@@ -113,6 +113,8 @@ class SourceConfigCreate(BaseModel):
     notes: str | None = None
     requires_credentials: bool = False
     credential_type: str | None = None
+    credential_username: str | None = None
+    credential_secret_ref: str | None = None
     credential_notes: str | None = None
     auth_status: str | None = "Not Configured"
 
@@ -126,12 +128,15 @@ class SourceConfigUpdate(BaseModel):
     notes: str | None = None
     requires_credentials: bool | None = None
     credential_type: str | None = None
+    credential_username: str | None = None
+    credential_secret_ref: str | None = None
     credential_notes: str | None = None
     auth_status: str | None = None
 
 
 class SourceConfigRead(SourceConfigCreate):
     id: int
+    auth_last_checked_at: datetime | None = None
     last_scrape_at: datetime | None = None
     last_scrape_status: str | None = None
     last_scrape_summary: str | None = None

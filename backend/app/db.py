@@ -88,8 +88,11 @@ def _ensure_source_scraper_columns() -> None:
     columns = {
         "requires_credentials": "BOOLEAN DEFAULT 0",
         "credential_type": "VARCHAR",
+        "credential_username": "VARCHAR",
+        "credential_secret_ref": "VARCHAR",
         "credential_notes": "VARCHAR",
         "auth_status": "VARCHAR DEFAULT 'Not Configured'",
+        "auth_last_checked_at": "DATETIME",
         "last_scrape_at": "DATETIME",
         "last_scrape_status": "VARCHAR",
         "last_scrape_summary": "VARCHAR",
