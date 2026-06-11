@@ -14,3 +14,4 @@ frontend/node_modules/
 *.db
 .DS_Store
 prompt_*.txt
+context.txt
