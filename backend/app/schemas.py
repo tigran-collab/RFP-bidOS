@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -105,6 +105,8 @@ class RequirementRead(BaseModel):
 
 
 class SourceConfigCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     source_type: str
     base_url: str | None = None
@@ -118,8 +120,35 @@ class SourceConfigCreate(BaseModel):
     credential_notes: str | None = None
     auth_status: str | None = "Not Configured"
 
+    @field_validator("credential_type")
+    @classmethod
+    def validate_credential_type(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {None, "Manual", "Environment", "Future Secret Store"},
+            "credential_type",
+        )
+
+    @field_validator("auth_status")
+    @classmethod
+    def validate_auth_status(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {
+                None,
+                "Not Required",
+                "Not Configured",
+                "Configured",
+                "Needs Review",
+                "Unsupported This Phase",
+            },
+            "auth_status",
+        )
+
 
 class SourceConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     source_type: str | None = None
     base_url: str | None = None
@@ -132,6 +161,31 @@ class SourceConfigUpdate(BaseModel):
     credential_secret_ref: str | None = None
     credential_notes: str | None = None
     auth_status: str | None = None
+
+    @field_validator("credential_type")
+    @classmethod
+    def validate_credential_type(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {None, "Manual", "Environment", "Future Secret Store"},
+            "credential_type",
+        )
+
+    @field_validator("auth_status")
+    @classmethod
+    def validate_auth_status(cls, value: str | None) -> str | None:
+        return _validate_choice(
+            value,
+            {
+                None,
+                "Not Required",
+                "Not Configured",
+                "Configured",
+                "Needs Review",
+                "Unsupported This Phase",
+            },
+            "auth_status",
+        )
 
 
 class SourceConfigRead(SourceConfigCreate):
@@ -160,3 +214,10 @@ class OpportunityEvaluationRead(BaseModel):
     recommended_next_action: str | None = None
     raw_response: str | None = None
     created_at: datetime
+
+
+def _validate_choice(value: str | None, allowed: set[str | None], field_name: str) -> str | None:
+    if value in allowed:
+        return value
+    allowed_values = ", ".join(sorted(item for item in allowed if item is not None))
+    raise ValueError(f"{field_name} must be one of: {allowed_values}")
