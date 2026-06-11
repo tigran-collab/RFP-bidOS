@@ -25,6 +25,11 @@ class OpportunityCreate(BaseModel):
     bid_decision: str | None = None
     bid_score: float | None = None
     bid_reason: str | None = None
+    ai_recommendation: str | None = None
+    ai_score: float | None = None
+    ai_reason: str | None = None
+    ai_risk_level: str | None = None
+    ai_evaluated_at: datetime | None = None
     status: str = "new"
 
 
@@ -46,6 +51,11 @@ class OpportunityUpdate(BaseModel):
     bid_decision: str | None = None
     bid_score: float | None = None
     bid_reason: str | None = None
+    ai_recommendation: str | None = None
+    ai_score: float | None = None
+    ai_reason: str | None = None
+    ai_risk_level: str | None = None
+    ai_evaluated_at: datetime | None = None
     status: str | None = None
 
 
@@ -106,4 +116,23 @@ class SourceConfigUpdate(BaseModel):
 
 class SourceConfigRead(SourceConfigCreate):
     id: int
+    created_at: datetime
+
+
+class OpportunityEvaluationRead(BaseModel):
+    id: int
+    opportunity_id: int
+    evaluator_type: str
+    model_name: str | None = None
+    recommendation: str | None = None
+    score: float | None = None
+    risk_level: str | None = None
+    pursuit_effort: str | None = None
+    reason: str | None = None
+    positive_factors_json: str | None = None
+    negative_factors_json: str | None = None
+    missing_information_json: str | None = None
+    questions_to_verify_json: str | None = None
+    recommended_next_action: str | None = None
+    raw_response: str | None = None
     created_at: datetime

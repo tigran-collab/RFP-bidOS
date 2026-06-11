@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
 import {
+  aiEvaluateOpportunity,
   downloadOpportunityDocuments,
   getOpportunity,
   getOpportunityDocuments,
+  getOpportunityEvaluations,
   parseOpportunityDocuments,
   scoreOpportunity,
 } from "../api.js";
@@ -37,13 +39,40 @@ function DetailRow({ label, value }) {
   );
 }
 
+function parseList(value) {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function FactorList({ items }) {
+  if (!items.length) {
+    return <p>-</p>;
+  }
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
 export default function OpportunityDetail({ opportunityId }) {
   const [opportunity, setOpportunity] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [evaluations, setEvaluations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [aiEvaluating, setAiEvaluating] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -58,12 +87,14 @@ export default function OpportunityDetail({ opportunityId }) {
 
       try {
         setLoading(true);
-        const [opportunityResult, documentsResult] = await Promise.all([
+        const [opportunityResult, documentsResult, evaluationsResult] = await Promise.all([
           getOpportunity(opportunityId),
           getOpportunityDocuments(opportunityId),
+          getOpportunityEvaluations(opportunityId),
         ]);
         setOpportunity(opportunityResult);
         setDocuments(documentsResult);
+        setEvaluations(evaluationsResult);
         setError("");
       } catch {
         setError(errorMessage);
@@ -122,6 +153,32 @@ export default function OpportunityDetail({ opportunityId }) {
     }
   }
 
+  async function runAiEvaluation() {
+    try {
+      setAiEvaluating(true);
+      const result = await aiEvaluateOpportunity(opportunityId);
+      const [opportunityResult, evaluationsResult] = await Promise.all([
+        getOpportunity(opportunityId),
+        getOpportunityEvaluations(opportunityId),
+      ]);
+      setOpportunity(opportunityResult);
+      setEvaluations(evaluationsResult);
+      if (result.error) {
+        setActionError(result.error);
+        setActionMessage("");
+      } else {
+        setActionMessage("Local AI evaluation updated.");
+        setActionError("");
+      }
+    } catch {
+      setActionError(
+        "Local AI model is not available. Start Ollama and make sure the model is installed."
+      );
+    } finally {
+      setAiEvaluating(false);
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -130,6 +187,9 @@ export default function OpportunityDetail({ opportunityId }) {
     return <p className="error-text">{error}</p>;
   }
 
+  const latestEvaluation = evaluations[0] || null;
+  const busy = scoring || downloading || parsing || aiEvaluating;
+
   return (
     <section>
       <h1>{opportunity.title}</h1>
@@ -137,7 +197,7 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="primary-button"
           type="button"
-          disabled={scoring || downloading || parsing}
+          disabled={busy}
           onClick={runScore}
         >
           {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
@@ -145,7 +205,7 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="primary-button"
           type="button"
-          disabled={scoring || downloading || parsing}
+          disabled={busy}
           onClick={runDownload}
         >
           {downloading ? "Downloading..." : "Download Documents"}
@@ -153,10 +213,18 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="primary-button"
           type="button"
-          disabled={scoring || downloading || parsing}
+          disabled={busy}
           onClick={runParse}
         >
           {parsing ? "Parsing..." : "Parse Documents"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runAiEvaluation}
+        >
+          {aiEvaluating ? "Evaluating..." : "Run Local AI Evaluation"}
         </button>
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
@@ -194,8 +262,44 @@ export default function OpportunityDetail({ opportunityId }) {
         <DetailRow label="Bid decision" value={opportunity.bid_decision} />
         <DetailRow label="Bid score" value={opportunity.bid_score} />
         <DetailRow label="Bid reason" value={opportunity.bid_reason} />
+        <DetailRow label="AI recommendation" value={opportunity.ai_recommendation} />
+        <DetailRow label="AI score" value={opportunity.ai_score} />
+        <DetailRow label="AI reason" value={opportunity.ai_reason} />
+        <DetailRow label="AI risk level" value={opportunity.ai_risk_level} />
         <DetailRow label="Status" value={opportunity.status} />
       </dl>
+      <h2>Local AI Evaluation</h2>
+      {!latestEvaluation ? (
+        <p>No local AI evaluation found.</p>
+      ) : (
+        <dl className="detail-grid">
+          <DetailRow label="AI recommendation" value={latestEvaluation.recommendation} />
+          <DetailRow label="AI score" value={latestEvaluation.score} />
+          <DetailRow label="Risk level" value={latestEvaluation.risk_level} />
+          <DetailRow label="Pursuit effort" value={latestEvaluation.pursuit_effort} />
+          <DetailRow label="Reason" value={latestEvaluation.reason} />
+          <DetailRow
+            label="Positive factors"
+            value={<FactorList items={parseList(latestEvaluation.positive_factors_json)} />}
+          />
+          <DetailRow
+            label="Negative factors"
+            value={<FactorList items={parseList(latestEvaluation.negative_factors_json)} />}
+          />
+          <DetailRow
+            label="Missing information"
+            value={<FactorList items={parseList(latestEvaluation.missing_information_json)} />}
+          />
+          <DetailRow
+            label="Questions to verify"
+            value={<FactorList items={parseList(latestEvaluation.questions_to_verify_json)} />}
+          />
+          <DetailRow
+            label="Recommended next action"
+            value={latestEvaluation.recommended_next_action}
+          />
+        </dl>
+      )}
       <h2>Documents</h2>
       {!documents.length ? (
         <p>No documents found.</p>

@@ -22,6 +22,8 @@ export default function OpportunityTable({ opportunities, onOpenOpportunity }) {
           <th>Due Date</th>
           <th>Bid Decision</th>
           <th>Bid Score</th>
+          <th>AI Recommendation</th>
+          <th>AI Score</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -42,6 +44,8 @@ export default function OpportunityTable({ opportunities, onOpenOpportunity }) {
             <td>{formatDate(opportunity.due_date)}</td>
             <td>{opportunity.bid_decision || ""}</td>
             <td>{opportunity.bid_score ?? ""}</td>
+            <td>{opportunity.ai_recommendation || ""}</td>
+            <td>{opportunity.ai_score ?? ""}</td>
             <td>
               <StatusBadge status={opportunity.status || "unknown"} />
             </td>

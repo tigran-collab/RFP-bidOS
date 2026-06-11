@@ -4,13 +4,18 @@ from fastapi import APIRouter, HTTPException
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Document, Opportunity, Requirement
+from app.models import Document, Opportunity, OpportunityEvaluation, Requirement
 from app.schemas import (
     DocumentRead,
     OpportunityCreate,
+    OpportunityEvaluationRead,
     OpportunityRead,
     OpportunityUpdate,
     RequirementRead,
+)
+from app.services.ai_evaluator import (
+    LOCAL_AI_UNAVAILABLE,
+    evaluate_opportunity_with_local_ai,
 )
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import parse_documents_for_opportunity
@@ -83,6 +88,33 @@ def score_opportunity(opportunity_id: int) -> dict:
         session.refresh(opportunity)
 
         return {"scoring_result": scoring_result, "opportunity": opportunity}
+
+
+@router.post("/{opportunity_id}/ai-evaluate")
+def ai_evaluate_opportunity(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        result = evaluate_opportunity_with_local_ai(opportunity_id, session)
+        if result.get("error") == LOCAL_AI_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        return result
+
+
+@router.get("/{opportunity_id}/evaluations", response_model=list[OpportunityEvaluationRead])
+def list_opportunity_evaluations(opportunity_id: int) -> list[OpportunityEvaluation]:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        statement = (
+            select(OpportunityEvaluation)
+            .where(OpportunityEvaluation.opportunity_id == opportunity_id)
+            .order_by(OpportunityEvaluation.created_at.desc())
+        )
+        return list(session.exec(statement).all())
 
 
 @router.delete("/{opportunity_id}")

@@ -19,6 +19,8 @@ python -m app.cli download-all-documents
 python -m app.cli parse-document 1
 python -m app.cli parse-opportunity-documents 1
 python -m app.cli parse-all-documents
+python -m app.cli ai-evaluate-opportunity 1
+python -m app.cli ai-evaluate-all-opportunities
 uvicorn app.main:app --reload
 ```
 
@@ -80,6 +82,30 @@ This phase only extracts embedded text from PDFs. It does not OCR scanned PDFs.
 Known issue: PyMuPDF/fitz may require dependency repair in the local virtual
 environment before PDF parsing works. If fitz cannot load, parser commands will
 leave the document marked as `Parse Failed` and return a clear error message.
+
+Local AI evaluation:
+
+Install Ollama, then pull the local model:
+
+```powershell
+ollama pull qwen2.5:3b
+```
+
+Run evaluation:
+
+```powershell
+python -m app.cli ai-evaluate-opportunity 1
+python -m app.cli ai-evaluate-all-opportunities
+```
+
+Environment variables:
+
+```powershell
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
 
 Frontend:
 

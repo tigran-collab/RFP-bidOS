@@ -37,6 +37,14 @@ export function parseOpportunityDocuments(id) {
   return request(`/opportunities/${id}/parse-documents`, { method: "POST" });
 }
 
+export function aiEvaluateOpportunity(id) {
+  return request(`/opportunities/${id}/ai-evaluate`, { method: "POST" });
+}
+
+export function getOpportunityEvaluations(id) {
+  return request(`/opportunities/${id}/evaluations`);
+}
+
 export function getSources() {
   return request("/sources");
 }

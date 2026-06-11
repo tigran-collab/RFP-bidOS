@@ -27,6 +27,11 @@ class Opportunity(SQLModel, table=True):
     bid_decision: str | None = None
     bid_score: float | None = None
     bid_reason: str | None = None
+    ai_recommendation: str | None = None
+    ai_score: float | None = None
+    ai_reason: str | None = None
+    ai_risk_level: str | None = None
+    ai_evaluated_at: datetime | None = None
     status: str = "new"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -82,3 +87,22 @@ class ScrapeRun(SQLModel, table=True):
     status: str = "pending"
     records_found: int = 0
     error_message: str | None = None
+
+
+class OpportunityEvaluation(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    opportunity_id: int = Field(foreign_key="opportunity.id", index=True)
+    evaluator_type: str
+    model_name: str | None = None
+    recommendation: str | None = None
+    score: float | None = None
+    risk_level: str | None = None
+    pursuit_effort: str | None = None
+    reason: str | None = None
+    positive_factors_json: str | None = None
+    negative_factors_json: str | None = None
+    missing_information_json: str | None = None
+    questions_to_verify_json: str | None = None
+    recommended_next_action: str | None = None
+    raw_response: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)

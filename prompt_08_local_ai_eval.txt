@@ -1,0 +1,246 @@
+Read prompt_08_local_ai_eval.txt and implement it exactly. Use local Ollama only. Do not use OpenAI API or any cloud AI. Keep rules-based scoring and PDF text extraction. Do not add proposal drafting, OCR, Playwright, logiThe app now has database models, frontend API connection, rules-based scoring, public scraper foundation, document downloader, and PDF text extraction. Implement local AI bid evaluation using Ollama only.
+
+Goal:
+Add a local AI evaluation layer that reviews opportunity fields, rules-based score, and any available extracted document text to produce a structured bid/no-bid evaluation.
+
+Do not use OpenAI API.
+Do not use cloud AI.
+Do not implement proposal drafting yet.
+Do not implement OCR.
+Do not implement Playwright.
+Do not implement login scraping.
+Do not submit anything.
+Do not recursively crawl websites.
+
+Important architecture:
+- Keep the existing rules-based scorer.
+- Keep the existing PDF parser.
+- The local AI evaluator should supplement the rules-based score.
+- The local AI evaluator should not automatically submit anything.
+- The final decision should remain human-reviewable.
+
+Backend requirements:
+
+1. Add configuration
+
+Support environment variable:
+
+OLLAMA_MODEL=qwen2.5:3b
+
+Default to qwen2.5:3b if not set.
+
+Support Ollama base URL:
+
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+2. Create backend/app/services/ai_evaluator.py
+
+Implement:
+
+- build_opportunity_evaluation_prompt(opportunity, rules_result=None, extracted_text_snippets=None) -> str
+- load_extracted_text_snippets(opportunity_id: int, session, max_chars: int = 12000) -> list[dict]
+- evaluate_opportunity_with_local_ai(opportunity_id: int, session) -> dict
+- parse_ai_json_response(response_text: str) -> dict
+
+Use Ollama local API:
+POST http://127.0.0.1:11434/api/generate
+
+Payload:
+{
+  "model": model_name,
+  "prompt": prompt,
+  "stream": false,
+  "format": "json",
+  "options": {
+    "temperature": 0.2
+  }
+}
+
+3. Extracted text handling
+
+If parsed documents exist:
+- Read extracted text files linked to the opportunity.
+- Include only a bounded amount of text.
+- max_chars default should be 12000 total.
+- Include source filename and extracted_text_path if available.
+- Do not crash if no extracted text exists.
+- If no extracted text exists, evaluate from opportunity fields only and include missing information.
+
+4. The AI prompt must instruct the model:
+
+You are evaluating government bid opportunities for a security services company.
+
+Prioritize:
+- security services fit
+- armed/unarmed/patrol/facility/courthouse/healthcare fit
+- location fit: CA, TX, NV, AZ
+- due date feasibility
+- mandatory pre-bid risk
+- licensing risk
+- insurance/bonding risk
+- unclear scope risk
+- as-needed/no guaranteed minimum risk
+- proposal effort vs likely value
+- whether the opportunity is worth pursuing
+
+Important user preference:
+Do not recommend purely as-needed, on-call, standby, or no-guaranteed-minimum contracts as strong pursuits unless there is a guaranteed minimum, clear strategic value, high likelihood of use, or very low response burden.
+
+Accuracy rules:
+- Do not invent deadlines, licenses, insurance, values, or requirements.
+- If information is missing, put it in missing_information.
+- If extracted text is incomplete, say so.
+- Return valid JSON only.
+
+Required JSON keys:
+{
+  "ai_recommendation": "Bid | Conditional Bid | No Bid | Needs Review",
+  "ai_score": 0-100,
+  "risk_level": "Low | Medium | High | Disqualifying",
+  "pursuit_effort": "Low | Medium | High",
+  "reason": "short direct explanation",
+  "positive_factors": [],
+  "negative_factors": [],
+  "missing_information": [],
+  "questions_to_verify": [],
+  "recommended_next_action": "short direct action"
+}
+
+5. Data used by AI
+
+The prompt should include:
+- opportunity title
+- agency
+- solicitation number
+- source
+- source_url
+- portal_url
+- location
+- due_date
+- pre_bid_date
+- pre_bid_mandatory
+- q_and_a_deadline
+- service_type
+- contract_type
+- estimated_value
+- existing rules-based bid_decision
+- existing rules-based bid_score
+- existing rules-based bid_reason
+- extracted text snippets from parsed documents if available
+
+6. Store AI result
+
+Create a new table:
+
+OpportunityEvaluation
+- id
+- opportunity_id
+- evaluator_type
+- model_name
+- recommendation
+- score
+- risk_level
+- pursuit_effort
+- reason
+- positive_factors_json
+- negative_factors_json
+- missing_information_json
+- questions_to_verify_json
+- recommended_next_action
+- raw_response
+- created_at
+
+Do not remove rules-based fields from Opportunity.
+
+If clean and safe, also store latest AI fields on Opportunity:
+- ai_recommendation
+- ai_score
+- ai_reason
+- ai_risk_level
+- ai_evaluated_at
+
+7. API route
+
+Add:
+
+POST /opportunities/{id}/ai-evaluate
+
+This should:
+- run local AI evaluation
+- save the result
+- return the result
+
+Also add:
+
+GET /opportunities/{id}/evaluations
+
+8. CLI commands
+
+Add:
+
+python -m app.cli ai-evaluate-opportunity <id>
+python -m app.cli ai-evaluate-all-opportunities
+
+The CLI should print:
+- title
+- AI recommendation
+- AI score
+- risk level
+- reason
+
+9. Frontend
+
+On OpportunityDetail page:
+- Add button: Run Local AI Evaluation
+- Show latest AI evaluation result:
+  - AI recommendation
+  - AI score
+  - risk level
+  - pursuit effort
+  - reason
+  - positive factors
+  - negative factors
+  - missing information
+  - questions to verify
+  - recommended next action
+
+On Opportunities table:
+- Show AI recommendation and AI score if available, without removing rules-based score.
+
+10. Error handling
+
+If Ollama is not running, return a clear error:
+
+"Local AI model is not available. Start Ollama and make sure the model is installed."
+
+If the model returns invalid JSON:
+- store raw response where available
+- return a clean error message
+- do not crash the app
+
+11. README
+
+Add local AI setup:
+
+Install Ollama.
+Pull model:
+ollama pull qwen2.5:3b
+
+Run evaluation:
+python -m app.cli ai-evaluate-opportunity 1
+python -m app.cli ai-evaluate-all-opportunities
+
+Environment variables:
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+
+12. Checks
+
+Run:
+- python -m app.cli init-db
+- python -m app.cli seed-demo
+- python -m app.cli parse-all-documents
+- python -m app.cli ai-evaluate-all-opportunities
+- npm.cmd run build
+
+Do not run uvicorn --reload as a long-running automated check inside Codex.n scraping, recursive crawling, or automated submission. Do not run uvicorn --reload as a long-running verification command.
