@@ -26,6 +26,10 @@ from app.services.logistics_extractor import (
     apply_logistics_for_status,
     apply_logistics_to_opportunity,
 )
+from app.services.logistics_qa import (
+    run_logistics_qa,
+    run_logistics_qa_for_status,
+)
 from app.services.pursuit_workflow import (
     run_pursuit_prep,
     run_pursuit_prep_for_status,
@@ -288,6 +292,48 @@ def extract_logistics_all_command(
         _echo_logistics(result)
 
 
+def _echo_logistics_qa(result: dict) -> None:
+    if result.get("error"):
+        typer.echo(result["error"])
+        return
+    typer.echo(f"[{result['opportunity_id']}] {result.get('title') or '-'}")
+    typer.echo(f"  QA status: {result.get('qa_status')}")
+    typer.echo(f"  risk level: {result.get('risk_level')}")
+    typer.echo(f"  summary: {result.get('summary')}")
+    for issue in result.get("issues", []):
+        typer.echo(f"  - issue [{issue['risk']}]: {issue['issue']}")
+    for action in result.get("recommended_actions", []):
+        typer.echo(f"  -> action: {action}")
+
+
+@cli.command("logistics-qa")
+def logistics_qa_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        result = run_logistics_qa(opportunity_id, session)
+    _echo_logistics_qa(result)
+
+
+@cli.command("logistics-qa-by-status")
+def logistics_qa_by_status_command(
+    status: str = typer.Option(..., "--status", help="Review status, e.g. Pursue"),
+    limit: int = typer.Option(10, "--limit", help="Max opportunities to process"),
+) -> None:
+    with Session(engine) as session:
+        batch = run_logistics_qa_for_status(status, session, limit=limit)
+    typer.echo(
+        f"Status '{batch['status']}': {batch['matched_count']} matched, "
+        f"{batch['processed_count']} processed (limit {batch['limit']})"
+    )
+    if batch.get("warning"):
+        typer.echo(f"WARNING: {batch['warning']}")
+    for result in batch["results"]:
+        _echo_logistics_qa(result)
+
+
 @cli.command("dashboard")
 def dashboard_command() -> None:
     """Print a concise operations dashboard."""
@@ -317,6 +363,11 @@ def dashboard_command() -> None:
         f"  deadlines: high_risk={counts['deadline_risk_high']} | "
         f"past_due={counts['deadline_past_due']} | "
         f"missing={counts['deadline_missing']}"
+    )
+    typer.echo(
+        f"  logistics QA: needs_review={counts['logistics_qa_needs_review']} | "
+        f"failed={counts['logistics_qa_failed']} | "
+        f"missing_critical={counts['missing_critical_logistics']}"
     )
 
     typer.echo("\n== Upcoming Deadlines (next 30 days) ==")

@@ -29,6 +29,7 @@ const DEADLINE_RISKS = [
   "Missing Deadline",
   "Needs Review",
 ];
+const QA_RISKS = ["Low", "Medium", "High", "Disqualifying"];
 
 function formatDate(value) {
   if (!value) {
@@ -43,6 +44,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [deadlineRiskFilter, setDeadlineRiskFilter] = useState("");
+  const [qaRiskFilter, setQaRiskFilter] = useState("");
   const [selected, setSelected] = useState(() => new Set());
   const [notesDraft, setNotesDraft] = useState({});
   const [busyId, setBusyId] = useState(null);
@@ -56,6 +58,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         status: statusFilter,
         priority: priorityFilter,
         deadline_risk: deadlineRiskFilter,
+        qa_risk: qaRiskFilter,
       });
       setOpportunities(result);
       setNotesDraft(
@@ -67,7 +70,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter, deadlineRiskFilter]);
+  }, [statusFilter, priorityFilter, deadlineRiskFilter, qaRiskFilter]);
 
   useEffect(() => {
     loadQueue();
@@ -221,6 +224,20 @@ export default function ReviewQueue({ onOpenOpportunity }) {
             ))}
           </select>
         </label>
+        <label>
+          QA risk
+          <select
+            value={qaRiskFilter}
+            onChange={(event) => setQaRiskFilter(event.target.value)}
+          >
+            <option value="">All</option>
+            {QA_RISKS.map((risk) => (
+              <option key={risk} value={risk}>
+                {risk}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {selected.size ? (
@@ -252,6 +269,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
               <th>Agency / Source</th>
               <th>Due</th>
               <th>Deadline Risk</th>
+              <th>QA</th>
               <th>Submission</th>
               <th>Bid Score</th>
               <th>AI Rec</th>
@@ -284,6 +302,11 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                 <td>{opp.agency || opp.source || ""}</td>
                 <td>{formatDate(opp.due_date)}</td>
                 <td>{opp.deadline_risk || ""}</td>
+                <td>
+                  {opp.logistics_qa_status
+                    ? `${opp.logistics_qa_status} / ${opp.logistics_qa_risk}`
+                    : ""}
+                </td>
                 <td>{opp.submission_method || ""}</td>
                 <td>{opp.bid_score ?? ""}</td>
                 <td>{opp.ai_recommendation || ""}</td>

@@ -6,11 +6,13 @@ import {
   downloadOpportunityDocuments,
   extractOpportunityLogistics,
   extractOpportunityRequirements,
+  getLogisticsQA,
   getOpportunity,
   getOpportunityDocuments,
   getOpportunityEvaluations,
   getOpportunityRequirements,
   parseOpportunityDocuments,
+  runLogisticsQA,
   runPursuitPrep,
   scoreOpportunity,
 } from "../api.js";
@@ -85,6 +87,8 @@ export default function OpportunityDetail({ opportunityId }) {
   const [aiEvaluating, setAiEvaluating] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractingLogistics, setExtractingLogistics] = useState(false);
+  const [runningQA, setRunningQA] = useState(false);
+  const [logisticsQA, setLogisticsQA] = useState(null);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -104,16 +108,19 @@ export default function OpportunityDetail({ opportunityId }) {
           documentsResult,
           evaluationsResult,
           requirementsResult,
+          qaResult,
         ] = await Promise.all([
           getOpportunity(opportunityId),
           getOpportunityDocuments(opportunityId),
           getOpportunityEvaluations(opportunityId),
           getOpportunityRequirements(opportunityId),
+          getLogisticsQA(opportunityId),
         ]);
         setOpportunity(opportunityResult);
         setDocuments(documentsResult);
         setEvaluations(evaluationsResult);
         setRequirements(requirementsResult);
+        setLogisticsQA(qaResult && qaResult.qa_status ? qaResult : null);
         setError("");
       } catch {
         setError(errorMessage);
@@ -164,6 +171,23 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to run pursuit prep. Is the backend running?");
     } finally {
       setPreparing(false);
+    }
+  }
+
+  async function runQA() {
+    try {
+      setRunningQA(true);
+      const result = await runLogisticsQA(opportunityId);
+      setLogisticsQA(result);
+      setActionMessage(
+        `Logistics QA: ${result.qa_status} (${result.risk_level} risk), ` +
+          `${result.issues?.length || 0} issue(s)`,
+      );
+      setActionError("");
+    } catch {
+      setActionError("Failed to run logistics QA. Is the backend running?");
+    } finally {
+      setRunningQA(false);
     }
   }
 
@@ -291,7 +315,8 @@ export default function OpportunityDetail({ opportunityId }) {
     parsing ||
     aiEvaluating ||
     extracting ||
-    extractingLogistics;
+    extractingLogistics ||
+    runningQA;
 
   return (
     <section>
@@ -320,6 +345,14 @@ export default function OpportunityDetail({ opportunityId }) {
           onClick={runExtractLogistics}
         >
           {extractingLogistics ? "Extracting Logistics..." : "Extract Logistics"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runQA}
+        >
+          {runningQA ? "Running QA..." : "Run Logistics QA"}
         </button>
         <button
           className="primary-button"
@@ -440,6 +473,47 @@ export default function OpportunityDetail({ opportunityId }) {
         />
         <DetailRow label="Logistics notes" value={opportunity.logistics_notes} />
       </dl>
+      <h2>Logistics QA</h2>
+      {!logisticsQA ? (
+        <p>No logistics QA run yet. Use Run Logistics QA after extracting logistics.</p>
+      ) : (
+        <dl className="detail-grid">
+          <DetailRow label="QA status" value={logisticsQA.qa_status} />
+          <DetailRow label="Risk level" value={logisticsQA.risk_level} />
+          <DetailRow label="Summary" value={logisticsQA.summary} />
+          <DetailRow
+            label="Issues"
+            value={
+              logisticsQA.issues?.length ? (
+                <ul>
+                  {logisticsQA.issues.map((issue, index) => (
+                    <li key={index}>
+                      [{issue.risk}] {issue.issue}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                "None"
+              )
+            }
+          />
+          <DetailRow
+            label="Recommended actions"
+            value={
+              logisticsQA.recommended_actions?.length ? (
+                <ul>
+                  {logisticsQA.recommended_actions.map((action, index) => (
+                    <li key={index}>{action}</li>
+                  ))}
+                </ul>
+              ) : (
+                "None"
+              )
+            }
+          />
+          <DetailRow label="Checked at" value={formatDate(logisticsQA.checked_at)} />
+        </dl>
+      )}
       <h2>Local AI Evaluation</h2>
       {!latestEvaluation ? (
         <p>No local AI evaluation found.</p>

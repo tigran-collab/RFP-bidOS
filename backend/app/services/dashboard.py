@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlmodel import select
 
 from app.models import (
+    BidLogisticsQA,
     Document,
     Opportunity,
     OpportunityEvaluation,
@@ -50,6 +51,14 @@ def get_operations_dashboard(session) -> dict:
     requirements = list(session.exec(select(Requirement)).all())
     sources = list(session.exec(select(SourceConfig)).all())
     evaluations = list(session.exec(select(OpportunityEvaluation)).all())
+    qa_records = list(session.exec(select(BidLogisticsQA)).all())
+
+    # Latest QA per opportunity (by checked_at).
+    latest_qa: dict[int, BidLogisticsQA] = {}
+    for qa in qa_records:
+        current = latest_qa.get(qa.opportunity_id)
+        if current is None or (qa.checked_at or datetime.min) > (current.checked_at or datetime.min):
+            latest_qa[qa.opportunity_id] = qa
 
     # --- per-opportunity document rollups ---
     docs_by_opp: dict[int, list[Document]] = {}
@@ -85,12 +94,21 @@ def get_operations_dashboard(session) -> dict:
         "deadline_missing": sum(
             1 for o in opportunities if o.deadline_risk == "Missing Deadline"
         ),
+        "logistics_qa_needs_review": sum(
+            1 for qa in latest_qa.values() if qa.qa_status == "Needs Review"
+        ),
+        "logistics_qa_failed": sum(
+            1 for qa in latest_qa.values() if qa.qa_status == "Failed"
+        ),
+        "missing_critical_logistics": sum(
+            1 for qa in latest_qa.values() if qa.qa_status == "Missing Critical Info"
+        ),
     }
 
     upcoming_deadlines = _upcoming_deadlines(opportunities, now)
     top_opportunities = _top_opportunities(opportunities)
     needs_action = _needs_action(
-        opportunities, docs_by_opp, requirement_opp_ids, evaluated_opp_ids, now
+        opportunities, docs_by_opp, requirement_opp_ids, evaluated_opp_ids, latest_qa, now
     )
     source_health = _source_health(sources)
     recent_activity = _recent_activity(opportunities)
@@ -161,6 +179,7 @@ def _needs_action(
     docs_by_opp: dict[int, list[Document]],
     requirement_opp_ids: set[int],
     evaluated_opp_ids: set[int],
+    latest_qa: dict[int, "BidLogisticsQA"],
     now: datetime,
 ) -> list[dict]:
     items: list[dict] = []
@@ -179,14 +198,24 @@ def _needs_action(
 
         # Deadline/logistics signals are the most urgent.
         active = status in {"Pursue", "Watchlist"}
+        qa = latest_qa.get(opp.id)
         pre_bid_soon = (
             opp.pre_bid_mandatory
             and opp.pre_bid_date
             and 0 <= _days_until(opp.pre_bid_date, now) <= 7
         )
-        if opp.deadline_risk == "Past Due":
+        if qa is not None and qa.qa_status == "Failed":
+            reason = f"Logistics QA failed ({qa.risk_level} risk)"
+            suggested_action = "Verify Portal"
+        elif qa is not None and qa.qa_status == "Missing Critical Info":
+            reason = "Logistics QA: missing critical info"
+            suggested_action = "Extract Logistics"
+        elif opp.deadline_risk == "Past Due":
             reason = "Due date is past due"
             suggested_action = "Verify Portal"
+        elif active and qa is None:
+            reason = "Logistics QA not run yet"
+            suggested_action = "Run Logistics QA"
         elif opp.deadline_risk == "Missing Deadline" and active:
             reason = "No due date found"
             suggested_action = "Verify Portal"

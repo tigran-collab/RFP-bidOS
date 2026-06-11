@@ -64,6 +64,14 @@ export function extractOpportunityLogistics(id) {
   return request(`/opportunities/${id}/extract-logistics`, { method: "POST" });
 }
 
+export function runLogisticsQA(id) {
+  return request(`/opportunities/${id}/logistics-qa`, { method: "POST" });
+}
+
+export function getLogisticsQA(id) {
+  return request(`/opportunities/${id}/logistics-qa`);
+}
+
 export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }

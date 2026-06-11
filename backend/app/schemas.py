@@ -111,6 +111,13 @@ class ExtractLogisticsByStatusRequest(BaseModel):
     limit: int = 10
 
 
+class LogisticsQAByStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    limit: int = 10
+
+
 class OpportunityUpdate(BaseModel):
     title: str | None = None
     agency: str | None = None

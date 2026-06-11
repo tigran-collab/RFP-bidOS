@@ -11,6 +11,7 @@ from app.schemas import (
     OpportunityEvaluationRead,
     OpportunityRead,
     ExtractLogisticsByStatusRequest,
+    LogisticsQAByStatusRequest,
     OpportunityReviewUpdate,
     OpportunityUpdate,
     PursuitPrepByStatusRequest,
@@ -34,6 +35,11 @@ from app.services.logistics_extractor import (
     apply_logistics_all,
     apply_logistics_for_status,
     apply_logistics_to_opportunity,
+)
+from app.services.logistics_qa import (
+    get_latest_logistics_qa,
+    run_logistics_qa,
+    run_logistics_qa_for_status,
 )
 from app.services.pursuit_workflow import (
     run_pursuit_prep,
@@ -66,7 +72,7 @@ REVIEW_STATUS_ORDER = {
 }
 
 
-@router.get("/review-queue", response_model=list[OpportunityRead])
+@router.get("/review-queue")
 def review_queue(
     status: str | None = Query(default=None),
     priority: str | None = Query(default=None),
@@ -76,13 +82,17 @@ def review_queue(
     service_type: str | None = Query(default=None),
     source_id: int | None = Query(default=None),
     deadline_risk: str | None = Query(default=None),
-) -> list[Opportunity]:
+    qa_risk: str | None = Query(default=None),
+) -> list[dict]:
     with Session(engine) as session:
         opportunities = list(session.exec(select(Opportunity)).all())
         source_name = None
         if source_id is not None:
             source = session.get(SourceConfig, source_id)
             source_name = source.name if source else "no-such-source"
+        latest_qa = {
+            opp.id: get_latest_logistics_qa(opp.id, session) for opp in opportunities
+        }
 
     def keep(opp: Opportunity) -> bool:
         if status and (opp.review_status or "New") != status:
@@ -91,6 +101,10 @@ def review_queue(
             return False
         if deadline_risk and (opp.deadline_risk or "") != deadline_risk:
             return False
+        if qa_risk:
+            qa = latest_qa.get(opp.id)
+            if not qa or qa.get("risk_level") != qa_risk:
+                return False
         if service_type and service_type.lower() not in (opp.service_type or "").lower():
             return False
         if min_score is not None and (opp.bid_score is None or opp.bid_score < min_score):
@@ -107,7 +121,17 @@ def review_queue(
 
     filtered = [opp for opp in opportunities if keep(opp)]
     filtered.sort(key=_review_sort_key)
-    return filtered
+
+    results = []
+    for opp in filtered:
+        item = OpportunityRead.model_validate(opp, from_attributes=True).model_dump(
+            mode="json"
+        )
+        qa = latest_qa.get(opp.id)
+        item["logistics_qa_status"] = qa.get("qa_status") if qa else None
+        item["logistics_qa_risk"] = qa.get("risk_level") if qa else None
+        results.append(item)
+    return results
 
 
 @router.post("/pursuit-prep/by-status")
@@ -126,6 +150,12 @@ def extract_logistics_batch(payload: ExtractLogisticsByStatusRequest | None = No
         if review_status:
             return apply_logistics_for_status(review_status, session, limit=limit)
         return apply_logistics_all(session, limit=limit)
+
+
+@router.post("/logistics-qa/by-status")
+def logistics_qa_by_status(payload: LogisticsQAByStatusRequest) -> dict:
+    with Session(engine) as session:
+        return run_logistics_qa_for_status(payload.status, session, limit=payload.limit)
 
 
 def _review_sort_key(opp: Opportunity) -> tuple:
@@ -190,6 +220,27 @@ def review_opportunity(opportunity_id: int, payload: OpportunityReviewUpdate) ->
         session.commit()
         session.refresh(opportunity)
         return opportunity
+
+
+@router.post("/{opportunity_id}/logistics-qa")
+def logistics_qa_one(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        result = run_logistics_qa(opportunity_id, session)
+        if result.get("error"):
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+
+
+@router.get("/{opportunity_id}/logistics-qa")
+def get_logistics_qa(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        result = get_latest_logistics_qa(opportunity_id, session)
+        if result is None:
+            return {"opportunity_id": opportunity_id, "qa_status": None}
+        return result
 
 
 @router.post("/{opportunity_id}/extract-logistics")

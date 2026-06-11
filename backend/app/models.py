@@ -125,6 +125,18 @@ class ScrapeRun(SQLModel, table=True):
     error_message: str | None = None
 
 
+class BidLogisticsQA(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    opportunity_id: int = Field(foreign_key="opportunity.id", index=True)
+    qa_status: str
+    risk_level: str
+    summary: str | None = None
+    issues_json: str | None = None
+    recommended_actions_json: str | None = None
+    checked_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class OpportunityEvaluation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     opportunity_id: int = Field(foreign_key="opportunity.id", index=True)
