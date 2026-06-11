@@ -4,7 +4,8 @@ import typer
 from sqlmodel import Session, select
 
 from app.db import engine, init_db
-from app.models import Opportunity
+from app.models import Opportunity, ScrapeRun, SourceConfig
+from app.services.scraper import scrape_source
 from app.services.scorer import score_opportunity_text
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
@@ -70,9 +71,32 @@ def seed_demo() -> None:
             status="demo",
         ),
     ]
+    demo_sources = [
+        SourceConfig(
+            name="Demo Public Procurement Page",
+            source_type="public_page",
+            base_url="https://example.com",
+            enabled=False,
+            notes="Placeholder public scraper source",
+        ),
+        SourceConfig(
+            name="Demo City Procurement Placeholder",
+            source_type="public_page",
+            base_url="https://example.com/procurement",
+            enabled=False,
+            notes="Disabled placeholder for future public procurement testing",
+        ),
+        SourceConfig(
+            name="Demo County Bids Placeholder",
+            source_type="public_page",
+            base_url="https://example.com/bids",
+            enabled=False,
+            notes="Disabled placeholder for future public bid page testing",
+        ),
+    ]
 
     with Session(engine) as session:
-        created = 0
+        opportunities_created = 0
         for opportunity in demo_opportunities:
             statement = select(Opportunity).where(
                 Opportunity.solicitation_number == opportunity.solicitation_number
@@ -80,10 +104,22 @@ def seed_demo() -> None:
             existing = session.exec(statement).first()
             if existing is None:
                 session.add(opportunity)
-                created += 1
+                opportunities_created += 1
+
+        sources_created = 0
+        for source in demo_sources:
+            statement = select(SourceConfig).where(SourceConfig.name == source.name)
+            existing = session.exec(statement).first()
+            if existing is None:
+                session.add(source)
+                sources_created += 1
         session.commit()
 
-    typer.echo(f"Demo seed complete: {created} opportunities created")
+    typer.echo(
+        "Demo seed complete: "
+        f"{opportunities_created} opportunities created, "
+        f"{sources_created} sources created"
+    )
 
 
 @cli.command("score-opportunity")
@@ -124,6 +160,70 @@ def score_all_opportunities() -> None:
                 f"({scoring_result['score']})"
             )
         session.commit()
+
+
+@cli.command("scrape-source")
+def scrape_source_command(source_id: int) -> None:
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+        if not source.enabled:
+            typer.echo(f"Source is disabled: {source.name}", err=True)
+            raise typer.Exit(code=1)
+
+    result = run_scrape_for_source(source)
+    typer.echo(f"Records found: {result['records_found']}")
+    typer.echo(f"Created: {result['created_count']}")
+    typer.echo(f"Skipped duplicates: {result['skipped_duplicates']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("scrape-enabled-sources")
+def scrape_enabled_sources_command() -> None:
+    with Session(engine) as session:
+        sources = list(
+            session.exec(select(SourceConfig).where(SourceConfig.enabled == True)).all()
+        )
+
+    if not sources:
+        typer.echo("No enabled sources to scrape")
+        return
+
+    for source in sources:
+        result = run_scrape_for_source(source)
+        typer.echo(
+            f"{source.name}: {result['records_found']} found, "
+            f"{result['created_count']} created, "
+            f"{result['skipped_duplicates']} duplicates"
+        )
+        if result["errors"]:
+            typer.echo(f"{source.name} errors: {'; '.join(result['errors'])}")
+
+
+def run_scrape_for_source(source: SourceConfig) -> dict:
+    run = ScrapeRun(source_name=source.name, status="running")
+    with Session(engine) as session:
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+
+    result = scrape_source(source)
+    status = "failed" if result["errors"] else "completed"
+
+    with Session(engine) as session:
+        scrape_run = session.get(ScrapeRun, run.id)
+        if scrape_run is not None:
+            scrape_run.finished_at = utc_now()
+            scrape_run.status = status
+            scrape_run.records_found = result["records_found"]
+            scrape_run.error_message = "; ".join(result["errors"]) or None
+            session.add(scrape_run)
+            session.commit()
+
+    return result
 
 
 if __name__ == "__main__":

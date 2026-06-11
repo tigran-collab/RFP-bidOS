@@ -28,3 +28,11 @@ export function scoreOpportunity(id) {
 export function getSources() {
   return request("/sources");
 }
+
+export function scrapeSource(id) {
+  return request(`/sources/${id}/scrape`, { method: "POST" });
+}
+
+export function scrapeEnabledSources() {
+  return request("/sources/scrape-enabled", { method: "POST" });
+}

@@ -13,6 +13,7 @@ copy .env.example .env
 python -m app.cli init-db
 python -m app.cli score-opportunity 1
 python -m app.cli score-all-opportunities
+python -m app.cli scrape-enabled-sources
 uvicorn app.main:app --reload
 ```
 
@@ -40,6 +41,16 @@ Scoring:
 python -m app.cli score-opportunity 1
 python -m app.cli score-all-opportunities
 ```
+
+Scraper:
+
+```powershell
+python -m app.cli scrape-enabled-sources
+```
+
+This phase only supports simple public pages. Login portals, Playwright
+automation, document downloading, PDF parsing, and submission workflows are
+future phases.
 
 Frontend:
 
