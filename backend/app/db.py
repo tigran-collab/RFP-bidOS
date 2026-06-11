@@ -2,6 +2,7 @@ from pathlib import Path
 
 from sqlmodel import SQLModel, create_engine
 
+from app import models  # noqa: F401
 from app.config import get_settings
 
 settings = get_settings()

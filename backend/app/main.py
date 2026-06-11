@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import analysis, documents, opportunities, scraper
+from app.routers import analysis, documents, opportunities, scraper, sources
 
 app = FastAPI(title="RFP BidOS")
 
@@ -8,6 +8,7 @@ app.include_router(opportunities.router)
 app.include_router(documents.router)
 app.include_router(scraper.router)
 app.include_router(analysis.router)
+app.include_router(sources.router)
 
 
 @app.get("/")

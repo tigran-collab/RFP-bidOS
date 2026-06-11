@@ -1,0 +1,110 @@
+The skeleton is created and runs. Implement database models and basic API routes only.
+
+Use SQLModel and SQLite.
+
+Create or verify these models:
+
+1. Opportunity
+Fields:
+- id
+- title
+- agency
+- solicitation_number
+- source
+- source_url
+- portal_url
+- location
+- due_date
+- pre_bid_date
+- pre_bid_mandatory
+- q_and_a_deadline
+- service_type
+- contract_type
+- estimated_value
+- bid_decision
+- bid_score
+- bid_reason
+- status
+- created_at
+- updated_at
+
+2. Document
+Fields:
+- id
+- opportunity_id
+- filename
+- path
+- file_type
+- sha256
+- source_url
+- downloaded_at
+- parsed_status
+
+3. Requirement
+Fields:
+- id
+- opportunity_id
+- document_id
+- requirement_text
+- source_file
+- source_page
+- source_section
+- mandatory
+- response_location
+- evidence_needed
+- owner
+- status
+- risk
+
+4. SourceConfig
+Fields:
+- id
+- name
+- source_type
+- base_url
+- login_url
+- enabled
+- notes
+- created_at
+
+5. ScrapeRun
+Fields:
+- id
+- source_name
+- started_at
+- finished_at
+- status
+- records_found
+- error_message
+
+API routes:
+- GET /opportunities
+- GET /opportunities/{id}
+- POST /opportunities
+- PATCH /opportunities/{id}
+- DELETE /opportunities/{id}
+- GET /opportunities/{id}/documents
+- GET /opportunities/{id}/requirements
+- GET /sources
+- POST /sources
+- PATCH /sources/{id}
+
+CLI:
+- python -m app.cli init-db
+- python -m app.cli seed-demo
+
+seed-demo should create 3 fake opportunities:
+1. Strong security opportunity
+2. As-needed low-priority security opportunity
+3. Non-security opportunity
+
+Rules:
+- Do not implement scraper yet.
+- Do not implement LLM features yet.
+- Do not implement frontend changes yet unless needed to avoid breakage.
+- Preserve the working /health endpoint.
+- Preserve working app startup.
+- After implementing, run:
+  python -m app.cli init-db
+  python -m app.cli seed-demo
+  uvicorn app.main:app --reload
