@@ -33,6 +33,12 @@ class Opportunity(SQLModel, table=True):
     ai_risk_level: str | None = None
     ai_evaluated_at: datetime | None = None
     status: str = "new"
+    review_status: str = "New"
+    review_notes: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
+    priority: str | None = None
+    next_action: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

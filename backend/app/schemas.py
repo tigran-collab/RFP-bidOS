@@ -31,6 +31,57 @@ class OpportunityCreate(BaseModel):
     ai_risk_level: str | None = None
     ai_evaluated_at: datetime | None = None
     status: str = "new"
+    review_status: str = "New"
+    review_notes: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
+    priority: str | None = None
+    next_action: str | None = None
+
+
+REVIEW_STATUS_CHOICES = {
+    "New",
+    "Needs Review",
+    "Pursue",
+    "Do Not Pursue",
+    "Watchlist",
+    "Archived",
+}
+PRIORITY_CHOICES = {"High", "Medium", "Low"}
+NEXT_ACTION_CHOICES = {
+    "Download Documents",
+    "Parse Documents",
+    "Run AI Evaluation",
+    "Extract Requirements",
+    "Verify Portal",
+    "Manual Review",
+    "No Action",
+}
+
+
+class OpportunityReviewUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_status: str | None = None
+    review_notes: str | None = None
+    priority: str | None = None
+    next_action: str | None = None
+    reviewed_by: str | None = None
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_review_status(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *REVIEW_STATUS_CHOICES}, "review_status")
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *PRIORITY_CHOICES}, "priority")
+
+    @field_validator("next_action")
+    @classmethod
+    def validate_next_action(cls, value: str | None) -> str | None:
+        return _validate_choice(value, {None, *NEXT_ACTION_CHOICES}, "next_action")
 
 
 class OpportunityUpdate(BaseModel):
@@ -57,6 +108,11 @@ class OpportunityUpdate(BaseModel):
     ai_risk_level: str | None = None
     ai_evaluated_at: datetime | None = None
     status: str | None = None
+    review_status: str | None = None
+    review_notes: str | None = None
+    priority: str | None = None
+    next_action: str | None = None
+    reviewed_by: str | None = None
 
 
 class OpportunityRead(OpportunityCreate):

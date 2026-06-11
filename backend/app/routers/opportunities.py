@@ -1,15 +1,16 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Document, Opportunity, OpportunityEvaluation, Requirement
+from app.models import Document, Opportunity, OpportunityEvaluation, Requirement, SourceConfig
 from app.schemas import (
     DocumentRead,
     OpportunityCreate,
     OpportunityEvaluationRead,
     OpportunityRead,
+    OpportunityReviewUpdate,
     OpportunityUpdate,
     RequirementRead,
 )
@@ -26,7 +27,7 @@ from app.services.requirement_extractor import (
     extract_requirements_with_local_ai,
     refresh_requirements_with_local_ai,
 )
-from app.services.scorer import score_opportunity_text
+from app.services.scorer import apply_scored_review_status, score_opportunity_text
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
@@ -39,6 +40,68 @@ def utc_now() -> datetime:
 def list_opportunities() -> list[Opportunity]:
     with Session(engine) as session:
         return list(session.exec(select(Opportunity)).all())
+
+
+# Ordering precedence for the review queue: actively-pursued and to-be-triaged
+# items float to the top; declined/archived sink to the bottom.
+REVIEW_STATUS_ORDER = {
+    "Pursue": 0,
+    "Needs Review": 1,
+    "New": 2,
+    "Watchlist": 3,
+    "Do Not Pursue": 4,
+    "Archived": 5,
+}
+
+
+@router.get("/review-queue", response_model=list[OpportunityRead])
+def review_queue(
+    status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    min_score: float | None = Query(default=None),
+    max_score: float | None = Query(default=None),
+    service_type: str | None = Query(default=None),
+    source_id: int | None = Query(default=None),
+) -> list[Opportunity]:
+    with Session(engine) as session:
+        opportunities = list(session.exec(select(Opportunity)).all())
+        source_name = None
+        if source_id is not None:
+            source = session.get(SourceConfig, source_id)
+            source_name = source.name if source else "no-such-source"
+
+    def keep(opp: Opportunity) -> bool:
+        if status and (opp.review_status or "New") != status:
+            return False
+        if priority and (opp.priority or "") != priority:
+            return False
+        if service_type and service_type.lower() not in (opp.service_type or "").lower():
+            return False
+        if min_score is not None and (opp.bid_score is None or opp.bid_score < min_score):
+            return False
+        if max_score is not None and (opp.bid_score is None or opp.bid_score > max_score):
+            return False
+        if state:
+            haystack = f"{opp.location or ''} {opp.source or ''}".lower()
+            if state.lower() not in haystack:
+                return False
+        if source_name is not None and (opp.source or "") != source_name:
+            return False
+        return True
+
+    filtered = [opp for opp in opportunities if keep(opp)]
+    filtered.sort(key=_review_sort_key)
+    return filtered
+
+
+def _review_sort_key(opp: Opportunity) -> tuple:
+    review_rank = REVIEW_STATUS_ORDER.get(opp.review_status or "New", 2)
+    has_due = 0 if opp.due_date else 1
+    due = opp.due_date or datetime.max
+    score = opp.bid_score if opp.bid_score is not None else -1e9
+    created = opp.created_at or datetime.min
+    return (review_rank, has_due, due, -score, -created.timestamp())
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityRead)
@@ -77,6 +140,25 @@ def update_opportunity(opportunity_id: int, payload: OpportunityUpdate) -> Oppor
         return opportunity
 
 
+@router.patch("/{opportunity_id}/review", response_model=OpportunityRead)
+def review_opportunity(opportunity_id: int, payload: OpportunityReviewUpdate) -> Opportunity:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        updates = payload.model_dump(exclude_unset=True)
+        for field, value in updates.items():
+            setattr(opportunity, field, value)
+        opportunity.reviewed_at = utc_now()
+        opportunity.updated_at = utc_now()
+
+        session.add(opportunity)
+        session.commit()
+        session.refresh(opportunity)
+        return opportunity
+
+
 @router.post("/{opportunity_id}/score")
 def score_opportunity(opportunity_id: int) -> dict:
     with Session(engine) as session:
@@ -88,6 +170,7 @@ def score_opportunity(opportunity_id: int) -> dict:
         opportunity.bid_score = scoring_result["score"]
         opportunity.bid_decision = scoring_result["decision"]
         opportunity.bid_reason = scoring_result["reason"]
+        apply_scored_review_status(opportunity, scoring_result["suggested_review_status"])
         opportunity.updated_at = utc_now()
 
         session.add(opportunity)

@@ -36,6 +36,21 @@ export function getOpportunity(id) {
   return request(`/opportunities/${id}`);
 }
 
+export function getReviewQueue(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      query.append(key, value);
+    }
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request(`/opportunities/review-queue${suffix}`);
+}
+
+export function reviewOpportunity(id, payload) {
+  return jsonRequest(`/opportunities/${id}/review`, payload, "PATCH");
+}
+
 export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }

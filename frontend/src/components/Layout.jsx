@@ -1,6 +1,7 @@
 const navItems = [
   { key: "dashboard", label: "Dashboard" },
   { key: "opportunities", label: "Opportunities" },
+  { key: "reviewQueue", label: "Review Queue" },
   { key: "scraper", label: "Scraper" },
   { key: "settings", label: "Settings" },
 ];

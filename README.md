@@ -170,6 +170,27 @@ Notes:
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Review Queue
+
+Scraped opportunities enter a human-controlled review workflow:
+
+- Newly scraped opportunities start as `New`.
+- Rules-based scoring helps prioritize but does **not** replace human review. A clearly negative/noise score suggests `Do Not Pursue`, and a promising score suggests `Needs Review` — but only for opportunities that have not yet been reviewed. Nothing is ever auto-archived or deleted.
+- Use `Pursue`, `Do Not Pursue`, `Watchlist`, and `Archived` to control workflow. Set priority (`High` / `Medium` / `Low`) and a next action.
+- Documents and AI actions (download, parse, AI evaluation, requirement extraction) should be run deliberately on promising opportunities, not in bulk on noise.
+
+CLI:
+
+```powershell
+cd backend
+python -m app.cli review-queue
+python -m app.cli review-queue --status New
+python -m app.cli mark-opportunity 1 --status Pursue
+python -m app.cli mark-opportunity 2 --status "Do Not Pursue" --notes "Navigation noise"
+```
+
+API: `GET /opportunities/review-queue` (filters: status, priority, state, min_score, max_score, service_type, source_id) and `PATCH /opportunities/{id}/review`. The frontend Review Queue page provides status/priority filters, per-row actions, inline notes, and bulk status changes.
+
 ## Scope Notes
 
 This project currently avoids proposal drafting, OCR, Playwright automation, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.

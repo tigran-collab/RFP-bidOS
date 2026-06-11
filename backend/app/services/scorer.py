@@ -170,7 +170,26 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         "positive_factors": positive_factors,
         "negative_factors": negative_factors,
         "verification_needed": verification_needed,
+        "suggested_review_status": _suggested_review_status(score, disqualified),
     }
+
+
+def _suggested_review_status(score: int, disqualified: bool) -> str:
+    """Suggest a review status from the score. Never archives or deletes."""
+    if disqualified or score < 0:
+        return "Do Not Pursue"
+    return "Needs Review"
+
+
+def apply_scored_review_status(opportunity: Any, suggested: str) -> None:
+    """Apply a suggested review status without overriding a human decision.
+
+    Only updates when the opportunity has not yet been triaged
+    (review_status is None or "New").
+    """
+    current = getattr(opportunity, "review_status", None)
+    if current in (None, "", "New"):
+        opportunity.review_status = suggested
 
 
 def _opportunity_text(opportunity: Any) -> str:

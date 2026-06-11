@@ -20,7 +20,7 @@ from app.services.scraper import (
 )
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
-from app.services.scorer import score_opportunity_text
+from app.services.scorer import apply_scored_review_status, score_opportunity_text
 from app.services.source_credentials import update_source_auth_status
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
@@ -186,6 +186,7 @@ def score_opportunity(opportunity_id: int) -> None:
         opportunity.bid_score = scoring_result["score"]
         opportunity.bid_decision = scoring_result["decision"]
         opportunity.bid_reason = scoring_result["reason"]
+        apply_scored_review_status(opportunity, scoring_result["suggested_review_status"])
         opportunity.updated_at = utc_now()
 
         session.add(opportunity)
@@ -205,6 +206,7 @@ def score_all_opportunities() -> None:
             opportunity.bid_score = scoring_result["score"]
             opportunity.bid_decision = scoring_result["decision"]
             opportunity.bid_reason = scoring_result["reason"]
+            apply_scored_review_status(opportunity, scoring_result["suggested_review_status"])
             opportunity.updated_at = utc_now()
             session.add(opportunity)
             typer.echo(
@@ -212,6 +214,96 @@ def score_all_opportunities() -> None:
                 f"({scoring_result['score']})"
             )
         session.commit()
+
+
+REVIEW_STATUS_ORDER = {
+    "Pursue": 0,
+    "Needs Review": 1,
+    "New": 2,
+    "Watchlist": 3,
+    "Do Not Pursue": 4,
+    "Archived": 5,
+}
+
+
+@cli.command("review-queue")
+def review_queue_command(
+    status: str = typer.Option(None, "--status", help="Filter by review status"),
+    priority: str = typer.Option(None, "--priority", help="Filter by priority"),
+) -> None:
+    with Session(engine) as session:
+        opportunities = list(session.exec(select(Opportunity)).all())
+
+    if status:
+        opportunities = [
+            o for o in opportunities if (o.review_status or "New") == status
+        ]
+    if priority:
+        opportunities = [o for o in opportunities if (o.priority or "") == priority]
+
+    if not opportunities:
+        typer.echo("No opportunities in the review queue match the filters")
+        return
+
+    opportunities.sort(
+        key=lambda o: (
+            REVIEW_STATUS_ORDER.get(o.review_status or "New", 2),
+            0 if o.due_date else 1,
+            o.due_date or datetime.max,
+            -(o.bid_score if o.bid_score is not None else -1e9),
+            -(o.created_at or datetime.min).timestamp(),
+        )
+    )
+
+    for opp in opportunities:
+        due = opp.due_date.strftime("%Y-%m-%d") if opp.due_date else "-"
+        agency = opp.agency or opp.source or "-"
+        typer.echo(
+            f"[{opp.id}] {opp.title[:50]:50} | {agency[:24]:24} | due {due} | "
+            f"score {opp.bid_score if opp.bid_score is not None else '-'} | "
+            f"{opp.bid_decision or '-'} | review={opp.review_status or 'New'} | "
+            f"priority={opp.priority or '-'} | next={opp.next_action or '-'}"
+        )
+
+
+@cli.command("mark-opportunity")
+def mark_opportunity_command(
+    opportunity_id: int,
+    status: str = typer.Option(None, "--status", help="New review status"),
+    notes: str = typer.Option(None, "--notes", help="Review notes"),
+    priority: str = typer.Option(None, "--priority", help="Priority"),
+    next_action: str = typer.Option(None, "--next-action", help="Next action"),
+    reviewed_by: str = typer.Option(None, "--reviewed-by", help="Reviewer name"),
+) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        if status is not None:
+            opportunity.review_status = status
+        if notes is not None:
+            opportunity.review_notes = notes
+        if priority is not None:
+            opportunity.priority = priority
+        if next_action is not None:
+            opportunity.next_action = next_action
+        if reviewed_by is not None:
+            opportunity.reviewed_by = reviewed_by
+        opportunity.reviewed_at = utc_now()
+        opportunity.updated_at = utc_now()
+
+        session.add(opportunity)
+        session.commit()
+        session.refresh(opportunity)
+
+        typer.echo(
+            f"[{opportunity.id}] {opportunity.title}: "
+            f"review={opportunity.review_status or 'New'}, "
+            f"priority={opportunity.priority or '-'}, "
+            f"next={opportunity.next_action or '-'}"
+        )
 
 
 @cli.command("scrape-source")
