@@ -33,6 +33,10 @@ export function downloadOpportunityDocuments(id) {
   return request(`/opportunities/${id}/download-documents`, { method: "POST" });
 }
 
+export function parseOpportunityDocuments(id) {
+  return request(`/opportunities/${id}/parse-documents`, { method: "POST" });
+}
+
 export function getSources() {
   return request("/sources");
 }

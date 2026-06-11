@@ -6,6 +6,11 @@ from sqlmodel import Session, select
 from app.db import engine, init_db
 from app.models import Opportunity, ScrapeRun, SourceConfig
 from app.services.downloader import download_documents_for_opportunity
+from app.services.parser import (
+    parse_all_documents,
+    parse_document,
+    parse_documents_for_opportunity,
+)
 from app.services.scraper import scrape_source
 from app.services.scorer import score_opportunity_text
 
@@ -242,6 +247,49 @@ def download_all_documents_command() -> None:
         f"Summary: {total_downloaded} downloaded, "
         f"{total_skipped} skipped, {len(total_errors)} errors"
     )
+
+
+@cli.command("parse-document")
+def parse_document_command(document_id: int) -> None:
+    with Session(engine) as session:
+        result = parse_document(document_id, session)
+
+    typer.echo(f"Status: {result['status']}")
+    typer.echo(f"Parsed: {result['parsed_count']}")
+    typer.echo(f"Skipped: {result['skipped_count']}")
+    typer.echo(f"Failed: {result['failed_count']}")
+    if result["extracted_text_path"]:
+        typer.echo(f"Extracted text: {result['extracted_text_path']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("parse-opportunity-documents")
+def parse_opportunity_documents_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        result = parse_documents_for_opportunity(opportunity_id, session)
+
+    typer.echo(f"Parsed: {result['parsed_count']}")
+    typer.echo(f"Skipped: {result['skipped_count']}")
+    typer.echo(f"Failed: {result['failed_count']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("parse-all-documents")
+def parse_all_documents_command() -> None:
+    with Session(engine) as session:
+        result = parse_all_documents(session)
+
+    typer.echo(f"Parsed: {result['parsed_count']}")
+    typer.echo(f"Skipped: {result['skipped_count']}")
+    typer.echo(f"Failed: {result['failed_count']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
 
 
 def run_scrape_for_source(source: SourceConfig) -> dict:

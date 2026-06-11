@@ -16,6 +16,9 @@ python -m app.cli score-all-opportunities
 python -m app.cli scrape-enabled-sources
 python -m app.cli download-documents 1
 python -m app.cli download-all-documents
+python -m app.cli parse-document 1
+python -m app.cli parse-opportunity-documents 1
+python -m app.cli parse-all-documents
 uvicorn app.main:app --reload
 ```
 
@@ -63,6 +66,20 @@ python -m app.cli download-all-documents
 
 This phase only downloads direct public document URLs. It does not crawl
 portals, log in, use Playwright, or parse PDFs.
+
+Parser:
+
+```powershell
+python -m app.cli parse-document 1
+python -m app.cli parse-opportunity-documents 1
+python -m app.cli parse-all-documents
+```
+
+This phase only extracts embedded text from PDFs. It does not OCR scanned PDFs.
+
+Known issue: PyMuPDF/fitz may require dependency repair in the local virtual
+environment before PDF parsing works. If fitz cannot load, parser commands will
+leave the document marked as `Parse Failed` and return a clear error message.
 
 Frontend:
 

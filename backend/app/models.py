@@ -42,6 +42,9 @@ class Document(SQLModel, table=True):
     source_url: str | None = None
     downloaded_at: datetime | None = None
     parsed_status: str = "pending"
+    extracted_text_path: str | None = None
+    page_count: int | None = None
+    parsed_at: datetime | None = None
 
 
 class Requirement(SQLModel, table=True):

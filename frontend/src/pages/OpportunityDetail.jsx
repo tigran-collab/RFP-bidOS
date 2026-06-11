@@ -4,6 +4,7 @@ import {
   downloadOpportunityDocuments,
   getOpportunity,
   getOpportunityDocuments,
+  parseOpportunityDocuments,
   scoreOpportunity,
 } from "../api.js";
 
@@ -42,6 +43,7 @@ export default function OpportunityDetail({ opportunityId }) {
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -104,6 +106,22 @@ export default function OpportunityDetail({ opportunityId }) {
     }
   }
 
+  async function runParse() {
+    try {
+      setParsing(true);
+      const result = await parseOpportunityDocuments(opportunityId);
+      setDocuments(await getOpportunityDocuments(opportunityId));
+      setActionMessage(
+        `${result.parsed_count} parsed, ${result.skipped_count} skipped, ${result.failed_count} failed.`
+      );
+      setActionError(result.errors?.length ? result.errors.join("; ") : "");
+    } catch {
+      setActionError("Failed to parse documents. Is the backend running?");
+    } finally {
+      setParsing(false);
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -119,7 +137,7 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="primary-button"
           type="button"
-          disabled={scoring || downloading}
+          disabled={scoring || downloading || parsing}
           onClick={runScore}
         >
           {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
@@ -127,10 +145,18 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="primary-button"
           type="button"
-          disabled={scoring || downloading}
+          disabled={scoring || downloading || parsing}
           onClick={runDownload}
         >
           {downloading ? "Downloading..." : "Download Documents"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={scoring || downloading || parsing}
+          onClick={runParse}
+        >
+          {parsing ? "Parsing..." : "Parse Documents"}
         </button>
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
@@ -180,6 +206,7 @@ export default function OpportunityDetail({ opportunityId }) {
               <th>Filename</th>
               <th>File Type</th>
               <th>Parsed Status</th>
+              <th>Extracted Text Path</th>
               <th>Source URL</th>
             </tr>
           </thead>
@@ -189,6 +216,7 @@ export default function OpportunityDetail({ opportunityId }) {
                 <td>{document.filename}</td>
                 <td>{document.file_type || ""}</td>
                 <td>{document.parsed_status}</td>
+                <td>{document.extracted_text_path || ""}</td>
                 <td>{document.source_url || ""}</td>
               </tr>
             ))}
