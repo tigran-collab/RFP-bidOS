@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 
-import { getSources, previewSource, scrapeEnabledSources, scrapeSource } from "../api.js";
+import {
+  checkSourceAuthStatus,
+  getSources,
+  previewSource,
+  scrapeEnabledSources,
+  scrapeSource,
+  updateSource,
+} from "../api.js";
 
 const errorMessage = "Failed to load source data. Is the backend running?";
 
@@ -40,13 +47,32 @@ export default function Scraper() {
   const [scraping, setScraping] = useState("");
   const [previewing, setPreviewing] = useState("");
   const [preview, setPreview] = useState(null);
+  const [sourceEdits, setSourceEdits] = useState({});
+  const [savingSource, setSavingSource] = useState("");
+  const [checkingAuth, setCheckingAuth] = useState("");
+  const [authResults, setAuthResults] = useState({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   async function loadSources() {
     try {
       setLoading(true);
-      setSources(await getSources());
+      const loadedSources = await getSources();
+      setSources(loadedSources);
+      setSourceEdits(
+        Object.fromEntries(
+          loadedSources.map((source) => [
+            source.id,
+            {
+              requires_credentials: Boolean(source.requires_credentials),
+              credential_type: source.credential_type || "",
+              credential_username: source.credential_username || "",
+              credential_secret_ref: source.credential_secret_ref || "",
+              credential_notes: source.credential_notes || "",
+            },
+          ]),
+        ),
+      );
       setError("");
     } catch {
       setError(errorMessage);
@@ -99,6 +125,45 @@ export default function Scraper() {
     }
   }
 
+  function updateSourceEdit(sourceId, field, value) {
+    setSourceEdits((current) => ({
+      ...current,
+      [sourceId]: {
+        ...current[sourceId],
+        [field]: value,
+      },
+    }));
+  }
+
+  async function saveSourceCredentials(source) {
+    try {
+      setSavingSource(String(source.id));
+      await updateSource(source.id, sourceEdits[source.id]);
+      await loadSources();
+      setMessage(`${source.name}: credential settings saved`);
+      setError("");
+    } catch {
+      setError("Failed to save credential settings.");
+    } finally {
+      setSavingSource("");
+    }
+  }
+
+  async function checkAuthStatus(source) {
+    try {
+      setCheckingAuth(String(source.id));
+      const result = await checkSourceAuthStatus(source.id);
+      setAuthResults((current) => ({ ...current, [source.id]: result }));
+      await loadSources();
+      setMessage(`${source.name}: ${result.auth_status}`);
+      setError("");
+    } catch {
+      setError("Failed to check auth status.");
+    } finally {
+      setCheckingAuth("");
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -130,11 +195,18 @@ export default function Scraper() {
               <th>Last Scrape</th>
               <th>Last Stats</th>
               <th>Auth</th>
+              <th>Credential Setup</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {sources.map((source) => (
+            {sources.map((source) => {
+              const edit = sourceEdits[source.id] || {};
+              const authResult = authResults[source.id];
+              const isBidNet = `${source.name} ${source.base_url || ""}`
+                .toLowerCase()
+                .includes("bidnet");
+              return (
               <tr key={source.id}>
                 <td>
                   <strong>{source.name}</strong>
@@ -149,9 +221,92 @@ export default function Scraper() {
                   {source.auth_status ? (
                     <div className="muted-text">{source.auth_status}</div>
                   ) : null}
+                  {source.auth_last_checked_at ? (
+                    <div className="muted-text">
+                      Checked {formatDate(source.auth_last_checked_at)}
+                    </div>
+                  ) : null}
+                </td>
+                <td>
+                  <div className="credential-grid">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(edit.requires_credentials)}
+                        onChange={(event) =>
+                          updateSourceEdit(
+                            source.id,
+                            "requires_credentials",
+                            event.target.checked,
+                          )
+                        }
+                      />
+                      Requires Credentials
+                    </label>
+                    <select
+                      value={edit.credential_type || ""}
+                      onChange={(event) =>
+                        updateSourceEdit(source.id, "credential_type", event.target.value)
+                      }
+                    >
+                      <option value="">None</option>
+                      <option value="Manual">Manual</option>
+                      <option value="Environment">Environment</option>
+                      <option value="Future Secret Store">Future Secret Store</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={edit.credential_username || ""}
+                      placeholder="Username"
+                      onChange={(event) =>
+                        updateSourceEdit(source.id, "credential_username", event.target.value)
+                      }
+                    />
+                    <input
+                      type="text"
+                      value={edit.credential_secret_ref || ""}
+                      placeholder="Secret reference"
+                      onChange={(event) =>
+                        updateSourceEdit(source.id, "credential_secret_ref", event.target.value)
+                      }
+                    />
+                    <textarea
+                      value={edit.credential_notes || ""}
+                      placeholder="Credential notes"
+                      rows="2"
+                      onChange={(event) =>
+                        updateSourceEdit(source.id, "credential_notes", event.target.value)
+                      }
+                    />
+                    {isBidNet ? (
+                      <p className="muted-text">
+                        BidNet credentials can be configured for future authenticated access.
+                        Authenticated scraping is not enabled in this phase.
+                      </p>
+                    ) : null}
+                    {authResult?.missing_fields?.length ? (
+                      <p className="error-text">{authResult.missing_fields.join("; ")}</p>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
                   <div className="button-row">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={savingSource !== ""}
+                      onClick={() => saveSourceCredentials(source)}
+                    >
+                      {savingSource === String(source.id) ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={checkingAuth !== ""}
+                      onClick={() => checkAuthStatus(source)}
+                    >
+                      {checkingAuth === String(source.id) ? "Checking..." : "Check Auth Status"}
+                    </button>
                     <button
                       className="secondary-button"
                       type="button"
@@ -171,7 +326,8 @@ export default function Scraper() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       )}

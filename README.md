@@ -103,6 +103,8 @@ cd backend
 python -m app.cli preview-source <source_id>
 python -m app.cli scrape-source <source_id>
 python -m app.cli scrape-enabled-sources
+python -m app.cli check-source-auth <source_id>
+python -m app.cli check-all-source-auth
 ```
 
 The scraper uses source adapters and heuristics for public procurement pages, table listings, notice pages, and direct document links. Preview shows candidates without saving them.
@@ -118,6 +120,17 @@ Scraper limitations:
 - Extracted fields require human review.
 
 BidNet and other authenticated sources may be marked as requiring credentials, but authenticated scraping is not implemented in this phase. Credential handling should be added later through a proper secret store, not raw plaintext passwords.
+
+Credential-aware source notes:
+
+- Public scraping is supported.
+- Authenticated scraping is not enabled yet.
+- BidNet can be marked as requiring credentials for future authenticated access.
+- Environment variables may be used later:
+  - `BIDNET_USERNAME`
+  - `BIDNET_PASSWORD`
+- Passwords are not stored in the database.
+- Do not commit credentials to git.
 
 ## Scope Notes
 

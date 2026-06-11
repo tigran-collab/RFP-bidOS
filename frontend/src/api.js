@@ -16,6 +16,14 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+function jsonRequest(path, payload, method = "POST") {
+  return request(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getHealth() {
   return request("/health");
 }
@@ -70,6 +78,18 @@ export function scrapeSource(id) {
 
 export function previewSource(id) {
   return request(`/sources/${id}/preview`, { method: "POST" });
+}
+
+export function updateSource(id, payload) {
+  return jsonRequest(`/sources/${id}`, payload, "PATCH");
+}
+
+export function getSourceAuthStatus(id) {
+  return request(`/sources/${id}/auth-status`);
+}
+
+export function checkSourceAuthStatus(id) {
+  return request(`/sources/${id}/auth-status/check`, { method: "POST" });
 }
 
 export function scrapeEnabledSources() {
