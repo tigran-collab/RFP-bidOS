@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2025 Artifex Software, Inc.
+// Copyright (C) 2004-2021 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -34,7 +34,6 @@ void *pdf_find_item(fz_context *ctx, fz_store_drop_fn *drop, pdf_obj *key);
 void pdf_remove_item(fz_context *ctx, fz_store_drop_fn *drop, pdf_obj *key);
 void pdf_empty_store(fz_context *ctx, pdf_document *doc);
 void pdf_purge_locals_from_store(fz_context *ctx, pdf_document *doc);
-void pdf_purge_object_from_store(fz_context *ctx, pdf_document *doc, int num);
 
 /*
  * Structures used for managing resource locations and avoiding multiple
@@ -47,7 +46,7 @@ void pdf_purge_object_from_store(fz_context *ctx, pdf_document *doc, int num);
 enum { PDF_SIMPLE_FONT_RESOURCE=1, PDF_CID_FONT_RESOURCE=2, PDF_CJK_FONT_RESOURCE=3 };
 enum { PDF_SIMPLE_ENCODING_LATIN, PDF_SIMPLE_ENCODING_GREEK, PDF_SIMPLE_ENCODING_CYRILLIC };
 
-/* The contents of this structure are defined publicly just so we can
+/* The contents of this structure are defined publically just so we can
  * define this on the stack. */
 typedef struct
 {
@@ -57,18 +56,10 @@ typedef struct
 	int local_xref;
 } pdf_font_resource_key;
 
-typedef struct
-{
-	unsigned char digest[16];
-	int local_xref;
-} pdf_colorspace_resource_key;
-
 pdf_obj *pdf_find_font_resource(fz_context *ctx, pdf_document *doc, int type, int encoding, fz_font *item, pdf_font_resource_key *key);
 pdf_obj *pdf_insert_font_resource(fz_context *ctx, pdf_document *doc, pdf_font_resource_key *key, pdf_obj *obj);
-pdf_obj *pdf_find_colorspace_resource(fz_context *ctx, pdf_document *doc, fz_colorspace *item, pdf_colorspace_resource_key *key);
-pdf_obj *pdf_insert_colorspace_resource(fz_context *ctx, pdf_document *doc, pdf_colorspace_resource_key *key, pdf_obj *obj);
 void pdf_drop_resource_tables(fz_context *ctx, pdf_document *doc);
-void pdf_purge_local_resources(fz_context *ctx, pdf_document *doc);
+void pdf_purge_local_font_resources(fz_context *ctx, pdf_document *doc);
 
 typedef struct pdf_function pdf_function;
 
@@ -84,8 +75,6 @@ int pdf_is_tint_colorspace(fz_context *ctx, fz_colorspace *cs);
 
 fz_shade *pdf_load_shading(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 void pdf_sample_shade_function(fz_context *ctx, float *samples, int n, int funcs, pdf_function **func, float t0, float t1);
-
-int pdf_guess_colorspace_components(fz_context *ctx, pdf_obj *obj);
 
 /**
 	Function to recolor a single color from a shade.
@@ -105,14 +94,12 @@ typedef pdf_recolor_vertex *(pdf_shade_recolorer)(fz_context *ctx, void *opaque,
 */
 pdf_obj *pdf_recolor_shade(fz_context *ctx, pdf_obj *shade, pdf_shade_recolorer *reshade, void *opaque);
 
-fz_image *pdf_load_inline_image(fz_context *ctx, pdf_document *doc, pdf_resource_stack *rdb, pdf_obj *dict, fz_stream *file);
+fz_image *pdf_load_inline_image(fz_context *ctx, pdf_document *doc, pdf_obj *rdb, pdf_obj *dict, fz_stream *file);
 int pdf_is_jpx_image(fz_context *ctx, pdf_obj *dict);
 
 fz_image *pdf_load_image(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
 
 pdf_obj *pdf_add_image(fz_context *ctx, pdf_document *doc, fz_image *image);
-
-pdf_obj *pdf_add_colorspace(fz_context *ctx, pdf_document *doc, fz_colorspace *cs);
 
 typedef struct
 {

@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2025 Artifex Software, Inc.
+// Copyright (C) 2004-2021 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -26,10 +26,7 @@
 #include "mupdf/fitz/store.h"
 #include "mupdf/pdf/document.h"
 
-// The maximum 1-to-many mapping length.
-// In the PDF reference, the max is 512 bytes for ToUnicode CMaps.
-// This results in us needing to support up to 256 characters.
-#define PDF_MRANGE_CAP 256
+#define PDF_MRANGE_CAP 32
 
 typedef struct
 {
@@ -100,7 +97,7 @@ void pdf_set_usecmap(fz_context *ctx, pdf_cmap *cmap, pdf_cmap *usecmap);
 void pdf_add_codespace(fz_context *ctx, pdf_cmap *cmap, unsigned int low, unsigned int high, size_t n);
 
 /*
-	Add a range of contiguous one-to-one mappings (i.e. 1..5 maps to 21..25)
+	Add a range of contiguous one-to-one mappings (ie 1..5 maps to 21..25)
 */
 void pdf_map_range_to_range(fz_context *ctx, pdf_cmap *cmap, unsigned int srclo, unsigned int srchi, int dstlo);
 

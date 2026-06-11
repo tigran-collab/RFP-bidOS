@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2025 Artifex Software, Inc.
+// Copyright (C) 2004-2022 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -102,8 +102,6 @@ struct pdf_xref
 */
 pdf_xref_entry *pdf_cache_object(fz_context *ctx, pdf_document *doc, int num);
 
-int pdf_object_exists(fz_context *ctx, pdf_document *doc, int num);
-
 int pdf_count_objects(fz_context *ctx, pdf_document *doc);
 
 /**
@@ -161,7 +159,6 @@ fz_compressed_buffer *pdf_load_compressed_stream(fz_context *ctx, pdf_document *
 void pdf_load_compressed_inline_image(fz_context *ctx, pdf_document *doc, pdf_obj *dict, int length, fz_stream *cstm, int indexed, fz_compressed_image *image);
 fz_stream *pdf_open_stream_with_offset(fz_context *ctx, pdf_document *doc, int num, pdf_obj *dict, int64_t stm_ofs);
 fz_stream *pdf_open_contents_stream(fz_context *ctx, pdf_document *doc, pdf_obj *obj);
-fz_buffer *pdf_load_image_stream(fz_context *ctx, pdf_document *doc, int num, fz_compression_params *params, int *truncated, size_t worst_case);
 
 int pdf_version(fz_context *ctx, pdf_document *doc);
 pdf_obj *pdf_trailer(fz_context *ctx, pdf_document *doc);
@@ -222,6 +219,8 @@ void pdf_xref_ensure_local_object(fz_context *ctx, pdf_document *doc, int num);
 int pdf_obj_is_incremental(fz_context *ctx, pdf_obj *obj);
 
 void pdf_repair_xref(fz_context *ctx, pdf_document *doc);
+void pdf_repair_obj_stms(fz_context *ctx, pdf_document *doc);
+void pdf_repair_trailer(fz_context *ctx, pdf_document *doc);
 
 /*
 	Ensure that the current populating xref has a single subsection

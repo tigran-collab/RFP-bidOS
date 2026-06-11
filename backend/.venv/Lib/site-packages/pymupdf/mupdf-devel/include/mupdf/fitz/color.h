@@ -1,4 +1,4 @@
-// Copyright (C) 2004-2025 Artifex Software, Inc.
+// Copyright (C) 2004-2021 Artifex Software, Inc.
 //
 // This file is part of MuPDF.
 //
@@ -58,14 +58,6 @@ enum
 	FZ_RI_RELATIVE_COLORIMETRIC,
 	FZ_RI_SATURATION,
 	FZ_RI_ABSOLUTE_COLORIMETRIC,
-};
-
-/* We abuse the top bit of the rendering intent to hold details of
- * whether we are in a softmask or not. This should not be used by
- * non-internal code. */
-enum
-{
-	FZ_RI_IN_SOFTMASK = 0x80
 };
 
 typedef struct
@@ -250,17 +242,11 @@ int fz_colorspace_is_rgb(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_cmyk(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_lab(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_indexed(fz_context *ctx, fz_colorspace *cs);
-int fz_colorspace_is_icc(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_device_n(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_device(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_device_gray(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_device_cmyk(fz_context *ctx, fz_colorspace *cs);
 int fz_colorspace_is_lab_icc(fz_context *ctx, fz_colorspace *cs);
-
-/**
-	Get checksum of underlying ICC profile.
-*/
-void fz_colorspace_digest(fz_context *ctx, fz_colorspace *cs, unsigned char digest[16]);
 
 /**
 	Check to see that a colorspace is appropriate to be used as
