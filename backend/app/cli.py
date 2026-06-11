@@ -10,6 +10,7 @@ from app.models import Document, Opportunity, ScrapeRun, SourceConfig
 from app.schemas import OpportunityCreate, OpportunityUpdate
 from app.services.ai_evaluator import evaluate_opportunity_with_local_ai
 from app.services.downloader import download_documents_for_opportunity
+from app.services.ollama_client import list_ollama_models
 from app.services.parser import (
     parse_all_documents,
     parse_document,
@@ -1086,6 +1087,24 @@ def parse_all_documents_command() -> None:
     typer.echo(f"Failed: {result['failed_count']}")
     if result["errors"]:
         typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("ai-status")
+def ai_status_command() -> None:
+    result = list_ollama_models()
+    typer.echo(f"Local AI: {'Available' if result['available'] else 'Unavailable'}")
+    typer.echo(f"Base URL: {result['base_url']}")
+    typer.echo(f"Model: {result['model']}")
+    if not result["available"]:
+        typer.echo(result["error"])
+        return
+    models = result.get("models") or []
+    if models:
+        names = [m.get("name") or m.get("model") for m in models if isinstance(m, dict)]
+        names = [name for name in names if name]
+        typer.echo(f"Installed models: {', '.join(names) if names else '-'}")
+    else:
+        typer.echo("Installed models: -")
 
 
 @cli.command("ai-evaluate-opportunity")

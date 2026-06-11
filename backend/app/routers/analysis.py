@@ -1,3 +1,10 @@
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+from app.services.ollama_client import list_ollama_models
+
+router = APIRouter(tags=["ai"])
+
+
+@router.get("/ai/status")
+def ai_status() -> dict:
+    return list_ollama_models()

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { API_BASE_URL, getHealth, getOperationsDashboard } from "../api.js";
+import { API_BASE_URL, getAiStatus, getHealth, getOperationsDashboard } from "../api.js";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const EXPORTS = [
@@ -34,18 +34,21 @@ export default function Dashboard({ onOpenOpportunity }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [online, setOnline] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);
   const [data, setData] = useState(null);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
         setLoading(true);
-        const [health, dashboard] = await Promise.all([
+        const [health, dashboard, ai] = await Promise.all([
           getHealth(),
           getOperationsDashboard(),
+          getAiStatus(),
         ]);
         setOnline(health.status === "ok");
         setData(dashboard);
+        setAiStatus(ai);
         setError("");
       } catch {
         setOnline(false);
@@ -74,6 +77,12 @@ export default function Dashboard({ onOpenOpportunity }) {
       <h1>RFP BidOS Dashboard</h1>
       <p className="muted-text">
         Backend: <strong>{online ? "Online" : "Offline"}</strong>
+      </p>
+      <p className="muted-text">
+        Local AI:{" "}
+        <strong>{aiStatus?.available ? "Available" : "Unavailable"}</strong>
+        {" | Model: "}
+        <strong>{aiStatus?.model || "qwen3:8b"}</strong>
       </p>
 
       <div className="metrics-grid">

@@ -3,17 +3,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import requests
 from sqlmodel import select
 
-from app.config import get_settings
 from app.models import Document, Opportunity, OpportunityEvaluation
+from app.services.ollama_client import (
+    LOCAL_AI_UNAVAILABLE,
+    LocalAIUnavailableError,
+    generate_json,
+)
 from app.services.scorer import score_opportunity_text
 
 
-LOCAL_AI_UNAVAILABLE = (
-    "Local AI model is not available. Start Ollama and make sure the model is installed."
-)
 REQUIRED_KEYS = {
     "ai_recommendation",
     "ai_score",
@@ -53,6 +53,12 @@ def build_opportunity_evaluation_prompt(
         "existing_rules_bid_decision": opportunity.bid_decision or rules.get("decision"),
         "existing_rules_bid_score": opportunity.bid_score or rules.get("score"),
         "existing_rules_bid_reason": opportunity.bid_reason or rules.get("reason"),
+        "as_needed_warning": getattr(opportunity, "as_needed_warning", False),
+        "relevance_score": getattr(opportunity, "relevance_score", None),
+        "relevance_decision": getattr(opportunity, "relevance_decision", None),
+        "relevance_reason": getattr(opportunity, "relevance_reason", None),
+        "keyword_matches_json": getattr(opportunity, "keyword_matches_json", None),
+        "negative_matches_json": getattr(opportunity, "negative_matches_json", None),
     }
     snippet_text = "\n\n".join(
         (
@@ -82,7 +88,7 @@ Prioritize:
 - whether the opportunity is worth pursuing
 
 Important user preference:
-Do not recommend purely as-needed, on-call, standby, or no-guaranteed-minimum contracts as strong pursuits unless there is a guaranteed minimum, clear strategic value, high likelihood of use, or very low response burden.
+Do not recommend purely as-needed, on-call, standby, bench, task-order-only, or no-guaranteed-minimum contracts as strong pursuits unless there is a guaranteed minimum, clear strategic value, high likelihood of use, or very low response burden.
 
 Accuracy rules:
 - Do not invent deadlines, licenses, insurance, values, or requirements.
@@ -151,36 +157,24 @@ def evaluate_opportunity_with_local_ai(opportunity_id: int, session) -> dict:
     if opportunity is None:
         return {"error": "Opportunity not found"}
 
-    settings = get_settings()
     rules_result = score_opportunity_text(opportunity)
     snippets = load_extracted_text_snippets(opportunity_id, session)
     prompt = build_opportunity_evaluation_prompt(opportunity, rules_result, snippets)
 
     try:
-        response = requests.post(
-            f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-            json={
-                "model": settings.ollama_model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.2},
-            },
-            timeout=120,
-        )
-        response.raise_for_status()
-    except requests.RequestException:
+        response = generate_json(prompt)
+    except LocalAIUnavailableError:
         return {"error": LOCAL_AI_UNAVAILABLE}
 
-    raw_response = response.text
+    raw_response = response["raw_response"]
+    response_text = response["response_text"]
+    model_name = response["model"]
     try:
-        ollama_payload = response.json()
-        response_text = ollama_payload.get("response", "")
         parsed = parse_ai_json_response(response_text)
     except (ValueError, TypeError) as exc:
         evaluation = _store_error_evaluation(
             opportunity,
-            settings.ollama_model,
+            model_name,
             raw_response,
             "Local AI model returned invalid JSON.",
             session,
@@ -193,9 +187,9 @@ def evaluate_opportunity_with_local_ai(opportunity_id: int, session) -> dict:
 
     evaluation = _store_success_evaluation(
         opportunity,
-        settings.ollama_model,
+        model_name,
         parsed,
-        response_text,
+        raw_response,
         session,
     )
     return {"evaluation": evaluation, "ai_result": parsed}
@@ -207,6 +201,11 @@ def parse_ai_json_response(response_text: str) -> dict:
         cleaned = cleaned.strip("`")
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
+    if not cleaned.startswith("{"):
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            cleaned = cleaned[start : end + 1]
     data = json.loads(cleaned)
     if not isinstance(data, dict):
         raise ValueError("AI response was not a JSON object")

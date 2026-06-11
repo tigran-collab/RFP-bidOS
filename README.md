@@ -79,24 +79,28 @@ python -m app.cli extract-all-requirements
 Install Ollama, then pull the local model:
 
 ```cmd
-ollama pull qwen2.5:3b
+ollama pull qwen3:8b
 ```
 
 Run local AI evaluation:
 
 ```cmd
 cd backend
+python -m app.cli ai-status
+python -m app.cli ai-evaluate-opportunity 1
 python -m app.cli ai-evaluate-all-opportunities
 ```
 
 Environment variables:
 
 ```cmd
-set OLLAMA_MODEL=qwen2.5:3b
+set OLLAMA_MODEL=qwen3:8b
 set OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
 Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
+If Ollama is off or the configured model is not installed, CLI/API/frontend surfaces show:
+`Local AI model is not available. Start Ollama and make sure the model is installed.`
 
 ## Parsing
 

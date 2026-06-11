@@ -32,6 +32,10 @@ export function getOperationsDashboard() {
   return request("/dashboard/operations");
 }
 
+export function getAiStatus() {
+  return request("/ai/status");
+}
+
 export function getOpportunities() {
   return request("/opportunities");
 }
