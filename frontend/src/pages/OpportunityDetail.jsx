@@ -10,6 +10,7 @@ import {
   getOpportunityEvaluations,
   getOpportunityRequirements,
   parseOpportunityDocuments,
+  runPursuitPrep,
   scoreOpportunity,
 } from "../api.js";
 import StatusBadge from "../components/StatusBadge.jsx";
@@ -76,6 +77,8 @@ export default function OpportunityDetail({ opportunityId }) {
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [pursuitResult, setPursuitResult] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
@@ -132,6 +135,33 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to score opportunity. Is the backend running?");
     } finally {
       setScoring(false);
+    }
+  }
+
+  async function runPrep() {
+    try {
+      setPreparing(true);
+      const result = await runPursuitPrep(opportunityId);
+      setPursuitResult(result);
+      const [opportunityResult, documentsResult, evaluationsResult, requirementsResult] =
+        await Promise.all([
+          getOpportunity(opportunityId),
+          getOpportunityDocuments(opportunityId),
+          getOpportunityEvaluations(opportunityId),
+          getOpportunityRequirements(opportunityId),
+        ]);
+      setOpportunity(opportunityResult);
+      setDocuments(documentsResult);
+      setEvaluations(evaluationsResult);
+      setRequirements(requirementsResult);
+      setActionMessage(
+        `Pursuit prep ${result.final_status} → next action: ${result.next_action}`,
+      );
+      setActionError(result.errors?.length ? result.errors.join("; ") : "");
+    } catch {
+      setActionError("Failed to run pursuit prep. Is the backend running?");
+    } finally {
+      setPreparing(false);
     }
   }
 
@@ -234,12 +264,26 @@ export default function OpportunityDetail({ opportunityId }) {
 
   const latestEvaluation = evaluations[0] || null;
   const busy =
-    scoring || discovering || downloading || parsing || aiEvaluating || extracting;
+    scoring ||
+    discovering ||
+    preparing ||
+    downloading ||
+    parsing ||
+    aiEvaluating ||
+    extracting;
 
   return (
     <section>
       <h1>{opportunity.title}</h1>
       <div className="page-actions">
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runPrep}
+        >
+          {preparing ? "Running Pursuit Prep..." : "Run Pursuit Prep"}
+        </button>
         <button
           className="primary-button"
           type="button"
@@ -291,6 +335,21 @@ export default function OpportunityDetail({ opportunityId }) {
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
       {actionError ? <p className="error-text">{actionError}</p> : null}
+      {pursuitResult ? (
+        <div className="pursuit-result">
+          <h3>
+            Pursuit Prep: {pursuitResult.final_status} → next action:{" "}
+            {pursuitResult.next_action}
+          </h3>
+          <ul>
+            {pursuitResult.step_results.map((step) => (
+              <li key={step.step}>
+                <strong>{step.step}</strong>: {step.status} — {step.summary}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <dl className="detail-grid">
         <DetailRow label="Title" value={opportunity.title} />
         <DetailRow label="Agency" value={opportunity.agency} />

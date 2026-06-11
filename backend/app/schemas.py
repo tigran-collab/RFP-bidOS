@@ -84,6 +84,20 @@ class OpportunityReviewUpdate(BaseModel):
         return _validate_choice(value, {None, *NEXT_ACTION_CHOICES}, "next_action")
 
 
+class PursuitPrepRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    steps: list[str] | None = None
+
+
+class PursuitPrepByStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    limit: int = 10
+    steps: list[str] | None = None
+
+
 class OpportunityUpdate(BaseModel):
     title: str | None = None
     agency: str | None = None

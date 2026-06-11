@@ -6,6 +6,7 @@ import {
   extractOpportunityRequirements,
   getReviewQueue,
   reviewOpportunity,
+  runPursuitPrep,
 } from "../api.js";
 import StatusBadge from "../components/StatusBadge.jsx";
 
@@ -91,6 +92,35 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       await loadQueue();
     } catch (err) {
       setError(err.message || `Failed to run ${label} for opportunity ${id}.`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function runPrep(id) {
+    try {
+      setBusyId(id);
+      setMessage(`Running pursuit prep for opportunity ${id}...`);
+      const result = await runPursuitPrep(id);
+      const m = result.metrics || {};
+      const parts = [
+        `${m.documents_discovered ?? 0} discovered`,
+        `${m.documents_downloaded ?? 0} downloaded`,
+        `${m.documents_parsed ?? 0} parsed`,
+        `AI ${m.ai_evaluated ? "ok" : "skipped/failed"}`,
+        `${m.requirements_extracted ?? 0} requirements`,
+      ];
+      const errSuffix = result.errors?.length
+        ? ` | errors: ${result.errors.length}`
+        : "";
+      setMessage(
+        `Opportunity ${id} pursuit prep (${result.final_status}): ` +
+          `${parts.join(", ")} → next: ${result.next_action}${errSuffix}`,
+      );
+      setError(result.errors?.length ? result.errors.join("; ") : "");
+      await loadQueue();
+    } catch (err) {
+      setError(err.message || `Failed to run pursuit prep for opportunity ${id}.`);
     } finally {
       setBusyId(null);
     }
@@ -255,6 +285,18 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                 <td>{opp.next_action || ""}</td>
                 <td>
                   <div className="review-actions">
+                    <button
+                      type="button"
+                      className={
+                        ["Pursue", "Watchlist"].includes(opp.review_status)
+                          ? "primary-button"
+                          : ""
+                      }
+                      disabled={busyId === opp.id}
+                      onClick={() => runPrep(opp.id)}
+                    >
+                      Run Pursuit Prep
+                    </button>
                     <button
                       type="button"
                       disabled={busyId === opp.id}

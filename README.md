@@ -191,6 +191,29 @@ python -m app.cli mark-opportunity 2 --status "Do Not Pursue" --notes "Navigatio
 
 API: `GET /opportunities/review-queue` (filters: status, priority, state, min_score, max_score, service_type, source_id) and `PATCH /opportunities/{id}/review`. The frontend Review Queue page provides status/priority filters, per-row actions, inline notes, and bulk status changes.
 
+## Pursuit Workflow
+
+The Review Queue controls which opportunities move forward. Once an opportunity is marked `Pursue` or `Watchlist`, **Pursuit Prep** runs the next-step actions deliberately:
+
+1. discover documents
+2. download documents
+3. parse documents
+4. run local AI evaluation
+5. extract requirements
+
+Pursuit Prep is only run when you explicitly trigger it — it is never run automatically on every scraped opportunity. Each step's errors are captured and the run continues where it safely can; if the local AI is unavailable, that step records a clean error without failing the whole workflow. After a run, `next_action` is set to `Review Requirements`, `Manual Review`, or `Verify Portal` (when no documents were found). `review_status` is never changed by Pursuit Prep, and nothing is archived or deleted.
+
+Batch prep **requires a review status and a limit** (default 10) so public websites are not hammered; if more items match than the limit, a warning reports how many were skipped.
+
+```powershell
+cd backend
+python -m app.cli pursuit-prep 1
+python -m app.cli pursuit-prep 1 --steps discover_documents,download_documents,parse_documents
+python -m app.cli pursuit-prep-by-status --status Pursue --limit 5
+```
+
+API: `POST /opportunities/{id}/pursuit-prep` (optional `{"steps": [...]}`) and `POST /opportunities/pursuit-prep/by-status` (`{"status": "Pursue", "limit": 10, "steps": [...]}`). The Review Queue and Opportunity Detail pages have a **Run Pursuit Prep** button.
+
 ## Scope Notes
 
 This project currently avoids proposal drafting, OCR, Playwright automation, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.

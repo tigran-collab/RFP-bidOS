@@ -20,6 +20,10 @@ from app.services.scraper import (
 )
 from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
+from app.services.pursuit_workflow import (
+    run_pursuit_prep,
+    run_pursuit_prep_for_status,
+)
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
 from app.services.source_credentials import update_source_auth_status
 
@@ -304,6 +308,60 @@ def mark_opportunity_command(
             f"priority={opportunity.priority or '-'}, "
             f"next={opportunity.next_action or '-'}"
         )
+
+
+def _parse_steps(steps: str | None) -> list[str] | None:
+    if not steps:
+        return None
+    return [part.strip() for part in steps.split(",") if part.strip()]
+
+
+def _echo_pursuit_summary(summary: dict) -> None:
+    typer.echo(
+        f"[{summary['opportunity_id']}] {summary.get('title') or '-'}: "
+        f"{summary['final_status']} | next={summary.get('next_action') or '-'}"
+    )
+    for step in summary.get("step_results", []):
+        typer.echo(f"  - {step['step']}: {step['status']} - {step['summary']}")
+    if summary.get("errors"):
+        typer.echo(f"  errors: {'; '.join(summary['errors'])}")
+
+
+@cli.command("pursuit-prep")
+def pursuit_prep_command(
+    opportunity_id: int,
+    steps: str = typer.Option(
+        None, "--steps", help="Comma-separated steps (default: all five steps)"
+    ),
+) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        summary = run_pursuit_prep(opportunity_id, session, steps=_parse_steps(steps))
+    _echo_pursuit_summary(summary)
+
+
+@cli.command("pursuit-prep-by-status")
+def pursuit_prep_by_status_command(
+    status: str = typer.Option(..., "--status", help="Review status, e.g. Pursue or Watchlist"),
+    limit: int = typer.Option(10, "--limit", help="Max opportunities to process"),
+    steps: str = typer.Option(None, "--steps", help="Comma-separated steps"),
+) -> None:
+    with Session(engine) as session:
+        batch = run_pursuit_prep_for_status(
+            status, session, steps=_parse_steps(steps), limit=limit
+        )
+
+    typer.echo(
+        f"Status '{batch['status']}': {batch['matched_count']} matched, "
+        f"{batch['processed_count']} processed (limit {batch['limit']})"
+    )
+    if batch.get("warning"):
+        typer.echo(f"WARNING: {batch['warning']}")
+    for summary in batch["results"]:
+        _echo_pursuit_summary(summary)
 
 
 @cli.command("scrape-source")

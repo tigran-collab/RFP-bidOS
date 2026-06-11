@@ -225,6 +225,25 @@ h2 {
   min-width: 160px;
 }
 
+.pursuit-result {
+  background: #f0f9ff;
+  border-left: 3px solid #0284c7;
+  padding: 0.5rem 0.75rem;
+  border-radius: 2px;
+  margin: 0.75rem 0;
+}
+
+.pursuit-result h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.pursuit-result ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+}
+
 .review-notes input {
   flex: 1;
   min-width: 100px;

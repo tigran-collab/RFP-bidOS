@@ -51,6 +51,11 @@ export function reviewOpportunity(id, payload) {
   return jsonRequest(`/opportunities/${id}/review`, payload, "PATCH");
 }
 
+export function runPursuitPrep(id, steps) {
+  const body = steps ? { steps } : {};
+  return jsonRequest(`/opportunities/${id}/pursuit-prep`, body, "POST");
+}
+
 export function scoreOpportunity(id) {
   return request(`/opportunities/${id}/score`, { method: "POST" });
 }

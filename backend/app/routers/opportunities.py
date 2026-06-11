@@ -12,6 +12,8 @@ from app.schemas import (
     OpportunityRead,
     OpportunityReviewUpdate,
     OpportunityUpdate,
+    PursuitPrepByStatusRequest,
+    PursuitPrepRequest,
     RequirementRead,
 )
 from app.services.ai_evaluator import (
@@ -26,6 +28,10 @@ from app.services.requirement_extractor import (
     NO_PARSED_TEXT,
     extract_requirements_with_local_ai,
     refresh_requirements_with_local_ai,
+)
+from app.services.pursuit_workflow import (
+    run_pursuit_prep,
+    run_pursuit_prep_for_status,
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
 
@@ -95,6 +101,14 @@ def review_queue(
     return filtered
 
 
+@router.post("/pursuit-prep/by-status")
+def pursuit_prep_by_status(payload: PursuitPrepByStatusRequest) -> dict:
+    with Session(engine) as session:
+        return run_pursuit_prep_for_status(
+            payload.status, session, steps=payload.steps, limit=payload.limit
+        )
+
+
 def _review_sort_key(opp: Opportunity) -> tuple:
     review_rank = REVIEW_STATUS_ORDER.get(opp.review_status or "New", 2)
     has_due = 0 if opp.due_date else 1
@@ -157,6 +171,16 @@ def review_opportunity(opportunity_id: int, payload: OpportunityReviewUpdate) ->
         session.commit()
         session.refresh(opportunity)
         return opportunity
+
+
+@router.post("/{opportunity_id}/pursuit-prep")
+def pursuit_prep(opportunity_id: int, payload: PursuitPrepRequest | None = None) -> dict:
+    steps = payload.steps if payload else None
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        return run_pursuit_prep(opportunity_id, session, steps=steps)
 
 
 @router.post("/{opportunity_id}/score")
