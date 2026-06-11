@@ -1,1 +1,15 @@
-__pycache__
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+data/downloads/
+data/processed/
+backend/data/downloads/
+backend/data/processed/
+frontend/dist/
+frontend/node_modules/
+*.sqlite
+*.db
+.DS_Store
+prompt_*.txt

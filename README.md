@@ -1,109 +1,55 @@
 # RFP BidOS
 
-Local-first Python, FastAPI, and React dashboard skeleton for RFP bid workflows.
+Local-first FastAPI and React dashboard for RFP bid tracking, public-page discovery, document parsing, rules-based scoring, local Ollama evaluation, and human-reviewable requirements extraction.
 
 ## Backend Setup
 
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
 python -m app.cli init-db
-python -m app.cli score-opportunity 1
-python -m app.cli score-all-opportunities
-python -m app.cli scrape-enabled-sources
-python -m app.cli download-documents 1
-python -m app.cli download-all-documents
-python -m app.cli parse-document 1
-python -m app.cli parse-opportunity-documents 1
-python -m app.cli parse-all-documents
-python -m app.cli extract-requirements 1
-python -m app.cli extract-all-requirements
-python -m app.cli ai-evaluate-opportunity 1
-python -m app.cli ai-evaluate-all-opportunities
-uvicorn app.main:app --reload
+python -m app.cli seed-demo
 ```
 
 ## Frontend Setup
 
 ```powershell
 cd frontend
-npm install
-npm run dev
+npm.cmd install
+npm.cmd run build
 ```
 
-## Run Commands
+## Run Manually
 
 Backend:
 
 ```powershell
 cd backend
-.\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload
 ```
 
-Scoring:
+Frontend:
 
 ```powershell
-python -m app.cli score-opportunity 1
+cd frontend
+npm.cmd run dev
+```
+
+## Developer Checks
+
+```powershell
+cd backend
+python -m app.cli init-db
+python -m app.cli seed-demo
 python -m app.cli score-all-opportunities
-```
-
-Scraper:
-
-```powershell
-python -m app.cli scrape-enabled-sources
-```
-
-This phase only supports simple public pages. Login portals, Playwright
-automation, document downloading, PDF parsing, and submission workflows are
-future phases.
-
-Document downloader:
-
-```powershell
-python -m app.cli download-documents 1
-python -m app.cli download-all-documents
-```
-
-This phase only downloads direct public document URLs. It does not crawl
-portals, log in, use Playwright, or parse PDFs.
-
-Parser:
-
-```powershell
-python -m app.cli parse-document 1
-python -m app.cli parse-opportunity-documents 1
 python -m app.cli parse-all-documents
-```
-
-This phase only extracts embedded text from PDFs. `pypdf` is the default parser
-because it avoids native Windows DLL dependency issues. PyMuPDF/fitz is optional
-and used only as a fallback when available. OCR is not supported yet, so
-scanned or image-only PDFs may produce little or no text.
-
-Requirements extraction:
-
-Parse documents first:
-
-```powershell
-python -m app.cli parse-opportunity-documents 1
-```
-
-Extract requirements:
-
-```powershell
-python -m app.cli extract-requirements 1
+python -m app.cli ai-evaluate-all-opportunities
 python -m app.cli extract-all-requirements
 ```
 
-Requirements extraction is local-AI-assisted through Ollama and creates a
-human-reviewable compliance matrix. It does not draft proposals or submit
-responses.
-
-Local AI evaluation:
+## Local AI
 
 Install Ollama, then pull the local model:
 
@@ -111,10 +57,10 @@ Install Ollama, then pull the local model:
 ollama pull qwen2.5:3b
 ```
 
-Run evaluation:
+Run local AI evaluation:
 
 ```powershell
-python -m app.cli ai-evaluate-opportunity 1
+cd backend
 python -m app.cli ai-evaluate-all-opportunities
 ```
 
@@ -127,14 +73,28 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
 
-Frontend:
+## Parsing
 
 ```powershell
-cd frontend
-npm.cmd install
-npm.cmd run dev
+cd backend
+python -m app.cli parse-all-documents
 ```
 
-## Warning
+PDF parsing uses `pypdf` by default. PyMuPDF is optional and used only as a fallback when available. OCR is not supported, so scanned or image-only PDFs may produce little or no text.
 
-Do not commit `.env`, `data/sessions`, `.venv`, or `node_modules`.
+## Requirements
+
+Parse documents first, then extract requirements:
+
+```powershell
+cd backend
+python -m app.cli parse-opportunity-documents 1
+python -m app.cli extract-requirements 1
+python -m app.cli extract-all-requirements
+```
+
+Requirements extraction is local-AI-assisted through Ollama and creates a human-reviewable compliance matrix. It does not draft proposals or submit responses.
+
+## Scope Notes
+
+This project currently avoids proposal drafting, OCR, Playwright automation, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.

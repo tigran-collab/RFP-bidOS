@@ -8,9 +8,4 @@ typer
 requests
 beautifulsoup4
 pypdf
-playwright
 PyMuPDF
-pandas
-openpyxl
-ollama
-jinja2
