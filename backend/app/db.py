@@ -18,6 +18,7 @@ def init_db() -> None:
     if settings.database_url.startswith("sqlite:///"):
         _ensure_document_parser_columns()
         _ensure_opportunity_ai_columns()
+        _ensure_requirement_matrix_columns()
 
 
 def _ensure_document_parser_columns() -> None:
@@ -54,5 +55,28 @@ def _ensure_opportunity_ai_columns() -> None:
             if column_name not in existing_columns:
                 session.exec(
                     text(f"ALTER TABLE opportunity ADD COLUMN {column_name} {column_type}")
+                )
+        session.commit()
+
+
+def _ensure_requirement_matrix_columns() -> None:
+    columns = {
+        "requirement_type": "VARCHAR",
+        "title": "VARCHAR",
+        "due_date": "DATETIME",
+        "assigned_response_section": "VARCHAR",
+        "notes": "VARCHAR",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+        "extractor_type": "VARCHAR",
+    }
+    with Session(engine) as session:
+        existing_columns = {
+            row[1] for row in session.exec(text("PRAGMA table_info(requirement)")).all()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                session.exec(
+                    text(f"ALTER TABLE requirement ADD COLUMN {column_name} {column_type}")
                 )
         session.commit()

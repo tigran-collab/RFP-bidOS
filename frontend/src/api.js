@@ -4,7 +4,14 @@ export const API_BASE_URL =
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, options);
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    let detail = `API request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || detail;
+    } catch {
+      detail = `API request failed: ${response.status}`;
+    }
+    throw new Error(detail);
   }
   return response.json();
 }
@@ -43,6 +50,14 @@ export function aiEvaluateOpportunity(id) {
 
 export function getOpportunityEvaluations(id) {
   return request(`/opportunities/${id}/evaluations`);
+}
+
+export function getOpportunityRequirements(id) {
+  return request(`/opportunities/${id}/requirements`);
+}
+
+export function extractOpportunityRequirements(id) {
+  return request(`/opportunities/${id}/extract-requirements`, { method: "POST" });
 }
 
 export function getSources() {

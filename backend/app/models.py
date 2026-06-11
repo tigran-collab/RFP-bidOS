@@ -56,15 +56,23 @@ class Requirement(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     opportunity_id: int = Field(foreign_key="opportunity.id", index=True)
     document_id: int | None = Field(default=None, foreign_key="document.id", index=True)
+    requirement_type: str | None = None
+    title: str | None = None
     requirement_text: str
     source_file: str | None = None
     source_page: int | None = None
     source_section: str | None = None
-    mandatory: bool = False
+    mandatory: bool = True
+    due_date: datetime | None = None
+    assigned_response_section: str | None = None
+    notes: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    extractor_type: str | None = None
     response_location: str | None = None
     evidence_needed: str | None = None
     owner: str | None = None
-    status: str = "open"
+    status: str = "Needs Review"
     risk: str | None = None
 
 

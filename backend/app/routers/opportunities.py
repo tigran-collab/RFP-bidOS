@@ -19,6 +19,12 @@ from app.services.ai_evaluator import (
 )
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import parse_documents_for_opportunity
+from app.services.requirement_extractor import (
+    INVALID_JSON,
+    NO_PARSED_TEXT,
+    extract_requirements_with_local_ai,
+    refresh_requirements_with_local_ai,
+)
 from app.services.scorer import score_opportunity_text
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
@@ -154,6 +160,38 @@ def parse_opportunity_documents(opportunity_id: int) -> dict:
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
         return parse_documents_for_opportunity(opportunity_id, session)
+
+
+@router.post("/{opportunity_id}/extract-requirements")
+def extract_opportunity_requirements(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        result = extract_requirements_with_local_ai(opportunity_id, session)
+        if result.get("error") == LOCAL_AI_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        if result.get("error") == NO_PARSED_TEXT:
+            raise HTTPException(status_code=400, detail=NO_PARSED_TEXT)
+        if result.get("error") == INVALID_JSON:
+            raise HTTPException(status_code=502, detail=INVALID_JSON)
+        return result
+
+
+@router.post("/{opportunity_id}/requirements/refresh")
+def refresh_opportunity_requirements(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        result = refresh_requirements_with_local_ai(opportunity_id, session)
+        if result.get("error") == LOCAL_AI_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        if result.get("error") == NO_PARSED_TEXT:
+            raise HTTPException(status_code=400, detail=NO_PARSED_TEXT)
+        if result.get("error") == INVALID_JSON:
+            raise HTTPException(status_code=502, detail=INVALID_JSON)
+        return result
 
 
 @router.get("/{opportunity_id}/requirements", response_model=list[RequirementRead])

@@ -84,11 +84,19 @@ class RequirementRead(BaseModel):
     id: int
     opportunity_id: int
     document_id: int | None = None
+    requirement_type: str | None = None
+    title: str | None = None
     requirement_text: str
     source_file: str | None = None
     source_page: int | None = None
     source_section: str | None = None
     mandatory: bool
+    due_date: datetime | None = None
+    assigned_response_section: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    extractor_type: str | None = None
     response_location: str | None = None
     evidence_needed: str | None = None
     owner: str | None = None

@@ -12,6 +12,7 @@ from app.services.parser import (
     parse_document,
     parse_documents_for_opportunity,
 )
+from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import scrape_source
 from app.services.scorer import score_opportunity_text
 
@@ -330,6 +331,40 @@ def ai_evaluate_all_opportunities_command() -> None:
             typer.echo(f"AI score: {evaluation.score}")
             typer.echo(f"Risk level: {evaluation.risk_level}")
             typer.echo(f"Reason: {evaluation.reason}")
+
+
+@cli.command("extract-requirements")
+def extract_requirements_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        result = extract_requirements_with_local_ai(opportunity_id, session)
+
+    if result.get("error"):
+        typer.echo(result["error"])
+        return
+
+    typer.echo(f"Title: {opportunity.title}")
+    typer.echo(f"Requirements extracted: {result['requirements_count']}")
+    typer.echo(f"Missing information items: {len(result['missing_information'])}")
+    typer.echo(f"Risk flags: {', '.join(result['risk_flags']) or '-'}")
+
+
+@cli.command("extract-all-requirements")
+def extract_all_requirements_command() -> None:
+    with Session(engine) as session:
+        opportunities = list(session.exec(select(Opportunity)).all())
+        for opportunity in opportunities:
+            result = extract_requirements_with_local_ai(opportunity.id, session)
+            if result.get("error"):
+                typer.echo(f"{opportunity.title}: {result['error']}")
+                continue
+            typer.echo(f"Title: {opportunity.title}")
+            typer.echo(f"Requirements extracted: {result['requirements_count']}")
+            typer.echo(f"Missing information items: {len(result['missing_information'])}")
+            typer.echo(f"Risk flags: {', '.join(result['risk_flags']) or '-'}")
 
 
 def run_scrape_for_source(source: SourceConfig) -> dict:

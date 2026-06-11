@@ -3,12 +3,15 @@ import { useEffect, useState } from "react";
 import {
   aiEvaluateOpportunity,
   downloadOpportunityDocuments,
+  extractOpportunityRequirements,
   getOpportunity,
   getOpportunityDocuments,
   getOpportunityEvaluations,
+  getOpportunityRequirements,
   parseOpportunityDocuments,
   scoreOpportunity,
 } from "../api.js";
+import StatusBadge from "../components/StatusBadge.jsx";
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
 
@@ -68,11 +71,13 @@ export default function OpportunityDetail({ opportunityId }) {
   const [opportunity, setOpportunity] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [evaluations, setEvaluations] = useState([]);
+  const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
@@ -87,14 +92,21 @@ export default function OpportunityDetail({ opportunityId }) {
 
       try {
         setLoading(true);
-        const [opportunityResult, documentsResult, evaluationsResult] = await Promise.all([
+        const [
+          opportunityResult,
+          documentsResult,
+          evaluationsResult,
+          requirementsResult,
+        ] = await Promise.all([
           getOpportunity(opportunityId),
           getOpportunityDocuments(opportunityId),
           getOpportunityEvaluations(opportunityId),
+          getOpportunityRequirements(opportunityId),
         ]);
         setOpportunity(opportunityResult);
         setDocuments(documentsResult);
         setEvaluations(evaluationsResult);
+        setRequirements(requirementsResult);
         setError("");
       } catch {
         setError(errorMessage);
@@ -179,6 +191,20 @@ export default function OpportunityDetail({ opportunityId }) {
     }
   }
 
+  async function runRequirementExtraction() {
+    try {
+      setExtracting(true);
+      const result = await extractOpportunityRequirements(opportunityId);
+      setRequirements(await getOpportunityRequirements(opportunityId));
+      setActionMessage(`${result.requirements_count} requirements extracted.`);
+      setActionError("");
+    } catch (err) {
+      setActionError(err.message || "Failed to extract requirements.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -188,7 +214,7 @@ export default function OpportunityDetail({ opportunityId }) {
   }
 
   const latestEvaluation = evaluations[0] || null;
-  const busy = scoring || downloading || parsing || aiEvaluating;
+  const busy = scoring || downloading || parsing || aiEvaluating || extracting;
 
   return (
     <section>
@@ -225,6 +251,14 @@ export default function OpportunityDetail({ opportunityId }) {
           onClick={runAiEvaluation}
         >
           {aiEvaluating ? "Evaluating..." : "Run Local AI Evaluation"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runRequirementExtraction}
+        >
+          {extracting ? "Extracting..." : "Extract Requirements"}
         </button>
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
@@ -299,6 +333,44 @@ export default function OpportunityDetail({ opportunityId }) {
             value={latestEvaluation.recommended_next_action}
           />
         </dl>
+      )}
+      <h2>Requirements / Compliance</h2>
+      {!requirements.length ? (
+        <p>No requirements found.</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Title</th>
+              <th>Mandatory</th>
+              <th>Status</th>
+              <th>Source Page</th>
+              <th>Assigned Section</th>
+              <th>Requirement</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requirements.map((requirement) => (
+              <tr key={requirement.id}>
+                <td>{requirement.requirement_type || "Other"}</td>
+                <td>{requirement.title || ""}</td>
+                <td>{requirement.mandatory ? "Yes" : "No"}</td>
+                <td>
+                  <StatusBadge status={requirement.status || "Needs Review"} />
+                </td>
+                <td>{requirement.source_page ?? ""}</td>
+                <td>{requirement.assigned_response_section || ""}</td>
+                <td>
+                  <details>
+                    <summary>View</summary>
+                    <p>{requirement.requirement_text}</p>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
       <h2>Documents</h2>
       {!documents.length ? (

@@ -19,6 +19,8 @@ python -m app.cli download-all-documents
 python -m app.cli parse-document 1
 python -m app.cli parse-opportunity-documents 1
 python -m app.cli parse-all-documents
+python -m app.cli extract-requirements 1
+python -m app.cli extract-all-requirements
 python -m app.cli ai-evaluate-opportunity 1
 python -m app.cli ai-evaluate-all-opportunities
 uvicorn app.main:app --reload
@@ -81,6 +83,25 @@ This phase only extracts embedded text from PDFs. `pypdf` is the default parser
 because it avoids native Windows DLL dependency issues. PyMuPDF/fitz is optional
 and used only as a fallback when available. OCR is not supported yet, so
 scanned or image-only PDFs may produce little or no text.
+
+Requirements extraction:
+
+Parse documents first:
+
+```powershell
+python -m app.cli parse-opportunity-documents 1
+```
+
+Extract requirements:
+
+```powershell
+python -m app.cli extract-requirements 1
+python -m app.cli extract-all-requirements
+```
+
+Requirements extraction is local-AI-assisted through Ollama and creates a
+human-reviewable compliance matrix. It does not draft proposals or submit
+responses.
 
 Local AI evaluation:
 
