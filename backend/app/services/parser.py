@@ -63,6 +63,16 @@ def parse_document(document_id: int, session) -> dict:
     if document is None:
         return _result(document_id=document_id, status="Parse Failed", errors=["Document not found"])
 
+    # Skip documents that have not been downloaded yet (no local file).
+    if not document.path or not Path(document.path).exists():
+        return _result(
+            document_id=document_id,
+            status="Not Downloaded",
+            skipped_count=1,
+            documents=[document],
+            parsed_status=document.parsed_status or "Not Downloaded",
+        )
+
     file_type = (document.file_type or Path(document.path).suffix).lower()
     if file_type in PDF_TYPES:
         return parse_pdf_to_text(document_id, session)

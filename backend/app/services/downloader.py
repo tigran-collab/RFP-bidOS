@@ -58,8 +58,13 @@ def sha256_file(path: str) -> str:
 def download_document(url: str, opportunity_id: int, session) -> dict:
     summary = _empty_summary()
 
+    # Scope to this opportunity: the same URL can belong to multiple
+    # opportunities, and we must never reassign another opportunity's document.
     existing_by_url = session.exec(
-        select(Document).where(Document.source_url == url)
+        select(Document).where(
+            Document.source_url == url,
+            Document.opportunity_id == opportunity_id,
+        )
     ).first()
     if existing_by_url is not None and existing_by_url.path:
         summary["skipped_count"] += 1
@@ -91,8 +96,13 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
     path.write_bytes(response.content)
 
     file_hash = sha256_file(str(path))
+    # Dedupe identical content within the same opportunity only, so each
+    # opportunity keeps its own self-contained document set.
     existing_by_hash = session.exec(
-        select(Document).where(Document.sha256 == file_hash)
+        select(Document).where(
+            Document.sha256 == file_hash,
+            Document.opportunity_id == opportunity_id,
+        )
     ).first()
     if existing_by_hash is not None:
         summary["skipped_count"] += 1
