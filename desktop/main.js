@@ -7,6 +7,7 @@ const path = require("node:path");
 const APP_TITLE = "RFP BidOS";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_MODEL = "qwen3:8b";
+const OLLAMA_START_TIMEOUT_MS = 60000;
 const BACKEND_URL = "http://127.0.0.1:8000";
 const FRONTEND_URL = "http://localhost:5173";
 
@@ -110,10 +111,46 @@ function escapeHtml(value) {
 }
 
 function commandExists(command) {
+  return Boolean(resolveCommand(command));
+}
+
+function resolveCommand(command) {
   const checker = process.platform === "win32" ? "where" : "command";
   const args = process.platform === "win32" ? [command] : ["-v", command];
   const options = process.platform === "win32" ? {} : { shell: true };
-  return spawnSync(checker, args, options).status === 0;
+  const result = spawnSync(checker, args, { ...options, encoding: "utf8" });
+  if (result.status === 0) {
+    const firstLine = String(result.stdout || "").split(/\r?\n/).find(Boolean);
+    return firstLine || command;
+  }
+
+  for (const candidate of commandCandidates(command)) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function commandCandidates(command) {
+  if (command !== "ollama") {
+    return [];
+  }
+  if (process.platform === "win32") {
+    return [
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Ollama", "ollama.exe"),
+      process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Ollama", "ollama.exe"),
+      process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Ollama", "ollama.exe"),
+    ].filter(Boolean);
+  }
+  if (process.platform === "darwin") {
+    return [
+      "/opt/homebrew/bin/ollama",
+      "/usr/local/bin/ollama",
+      "/Applications/Ollama.app/Contents/Resources/ollama",
+    ];
+  }
+  return ["/usr/local/bin/ollama", "/usr/bin/ollama"];
 }
 
 function pythonPath() {
@@ -201,15 +238,27 @@ async function ensureOllama() {
   showStatus("Starting RFP BidOS", "Checking Ollama...");
   let tags = await tryOllamaTags();
   if (!tags) {
+    const ollamaCommand = resolveCommand("ollama");
+    if (!ollamaCommand) {
+      throw new Error("Ollama is not installed or not on PATH. Install Ollama, then run: ollama pull qwen3:8b");
+    }
     showStatus("Starting RFP BidOS", "Ollama is not reachable. Starting ollama serve...");
-    started.ollama = spawn("ollama", ["serve"], {
+    started.ollama = spawn(ollamaCommand, ["serve"], {
       cwd: rootDir,
       env: process.env,
       stdio: "pipe",
       windowsHide: true,
     });
     attachProcessLogging("Ollama", started.ollama);
-    await waitForUrl(`${OLLAMA_BASE_URL}/api/tags`, 30000, "Ollama");
+    try {
+      await waitForUrl(`${OLLAMA_BASE_URL}/api/tags`, OLLAMA_START_TIMEOUT_MS, "Ollama");
+    } catch (error) {
+      const output = started.ollama._rfpOutput || "";
+      throw new Error(
+        `${error.message}\n\nThe launcher tried to start Ollama with:\n${ollamaCommand} serve` +
+          (output ? `\n\nOllama output:\n${output}` : "")
+      );
+    }
     tags = await tryOllamaTags();
   }
 
@@ -231,7 +280,15 @@ async function tryOllamaTags() {
 
 async function ensureBackend() {
   showStatus("Starting RFP BidOS", "Checking backend...");
-  if (await urlReady(`${BACKEND_URL}/health`)) return;
+  const backendHealthReady = await urlReady(`${BACKEND_URL}/health`);
+  if (backendHealthReady && await urlReady(`${BACKEND_URL}/ai/chat/status`)) {
+    return;
+  }
+  if (backendHealthReady) {
+    throw new Error(
+      "A backend is already running on 127.0.0.1:8000, but it does not have the Local AI Chat endpoints. Stop the old backend process and relaunch RFP BidOS."
+    );
+  }
 
   showStatus("Starting RFP BidOS", "Starting FastAPI backend...");
   if (process.platform === "win32") {
@@ -294,6 +351,7 @@ function attachProcessLogging(label, child) {
   let output = "";
   const append = (chunk) => {
     output = `${output}${chunk.toString()}`.slice(-8000);
+    child._rfpOutput = output;
   };
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);

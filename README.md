@@ -212,13 +212,15 @@ set OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
 If Ollama is off or the configured model is not installed, CLI/API/frontend surfaces show:
-`Local AI model is not available. Start Ollama and make sure the model is installed.`
+`Local AI model is not available. Start Ollama and make sure qwen3:8b is installed.`
 When Ollama is running but `qwen3:8b` is missing, `ai-status` also prints:
 `Configured model is not installed. Run: ollama pull qwen3:8b`
 
 ## Local AI Chat
 
 The app includes a simple **Local AI Chat** page and an opportunity-aware chat panel on Opportunity Detail. Chat uses local Ollama only with the default model `qwen3:8b`; it does not use OpenAI APIs or cloud AI.
+
+Local AI Chat can use read-only summarized app context, including current opportunities, deadlines, scores, review statuses, requirements, and logistics. It can analyze, rank, compare, and explain opportunities, but it cannot modify records, run scrapers, download documents, parse files, extract requirements, submit bids, or trigger app actions.
 
 Setup:
 

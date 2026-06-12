@@ -383,6 +383,28 @@ h2 {
   margin: 0.75rem 0;
 }
 
+.chat-context-row {
+  margin: 0.75rem 0;
+}
+
+.chat-context-row label {
+  display: grid;
+  gap: 0.25rem;
+  max-width: 280px;
+  color: #5b6778;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.chat-context-row select {
+  border: 1px solid #c8d0dc;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  color: #263241;
+  font: inherit;
+}
+
 .starter-prompts button {
   font-size: 0.85rem;
 }

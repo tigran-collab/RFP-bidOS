@@ -693,6 +693,7 @@ export default function OpportunityDetail({ opportunityId }) {
         compact
         title="Local AI Chat"
         context={{
+          mode: "opportunity",
           opportunity_id: opportunityId,
           include_opportunity: true,
           include_requirements: true,
