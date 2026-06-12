@@ -4,6 +4,22 @@ Local-first FastAPI and React dashboard for RFP bid tracking, public-page discov
 
 ## Backend Setup
 
+macOS:
+
+```bash
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m app.cli init-db
+python -m app.cli seed-demo
+python -m app.cli seed-sources
+```
+
+If `python3.12` is not installed, install Python 3.12 or newer and rebuild the backend venv. The app is intended to run on Python 3.12 or 3.13.
+
+Windows:
+
 ```cmd
 cd backend
 python -m venv .venv
@@ -15,6 +31,16 @@ python -m app.cli seed-demo
 
 ## Frontend Setup
 
+macOS:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Windows:
+
 ```cmd
 cd frontend
 npm.cmd install
@@ -25,6 +51,16 @@ npm.cmd run build
 
 Backend:
 
+macOS:
+
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --reload
+```
+
+Windows:
+
 ```cmd
 cd backend
 uvicorn app.main:app
@@ -32,9 +68,24 @@ uvicorn app.main:app
 
 Frontend:
 
+macOS:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Windows:
+
 ```cmd
 cd frontend
 npm.cmd run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
 ```
 
 ## Desktop Launcher
@@ -60,6 +111,14 @@ To create a Desktop shortcut:
 2. Choose **Show more options** if needed.
 3. Choose **Send to > Desktop (create shortcut)**.
 4. Rename the shortcut to `RFP BidOS`.
+
+On macOS, run:
+
+```bash
+./start_rfp_bidos_mac.sh
+```
+
+The Mac launcher checks whether Ollama is reachable at `http://127.0.0.1:11434`, starts `ollama serve` in Terminal if needed, starts backend and frontend Terminal windows, then opens `http://localhost:5173`. It does not install dependencies or create background services.
 
 ## Developer Checks
 
@@ -93,6 +152,15 @@ python -m app.cli ai-evaluate-all-opportunities
 
 Environment variables:
 
+macOS:
+
+```bash
+export OLLAMA_MODEL=qwen3:8b
+export OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Windows:
+
 ```cmd
 set OLLAMA_MODEL=qwen3:8b
 set OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -101,6 +169,8 @@ set OLLAMA_BASE_URL=http://127.0.0.1:11434
 Local AI evaluation uses Ollama only. It does not use OpenAI APIs or cloud AI.
 If Ollama is off or the configured model is not installed, CLI/API/frontend surfaces show:
 `Local AI model is not available. Start Ollama and make sure the model is installed.`
+When Ollama is running but `qwen3:8b` is missing, `ai-status` also prints:
+`Configured model is not installed. Run: ollama pull qwen3:8b`
 
 ## Parsing
 

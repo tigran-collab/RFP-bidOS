@@ -1103,8 +1103,11 @@ def ai_status_command() -> None:
         names = [m.get("name") or m.get("model") for m in models if isinstance(m, dict)]
         names = [name for name in names if name]
         typer.echo(f"Installed models: {', '.join(names) if names else '-'}")
+        if result["model"] not in names:
+            typer.echo(f"Configured model is not installed. Run: ollama pull {result['model']}")
     else:
         typer.echo("Installed models: -")
+        typer.echo(f"Configured model is not installed. Run: ollama pull {result['model']}")
 
 
 @cli.command("ai-evaluate-opportunity")
