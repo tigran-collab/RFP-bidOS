@@ -36,6 +36,14 @@ export function getAiStatus() {
   return request("/ai/status");
 }
 
+export function getAiChatStatus() {
+  return request("/ai/chat/status");
+}
+
+export function sendAiChatMessage(message, context = null) {
+  return jsonRequest("/ai/chat", { message, context }, "POST");
+}
+
 export function getOpportunities() {
   return request("/opportunities");
 }

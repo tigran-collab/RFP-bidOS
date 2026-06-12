@@ -1,0 +1,46 @@
+{
+  "name": "rfp-bidos-desktop",
+  "version": "0.1.0",
+  "description": "Cross-platform Electron launcher for RFP BidOS.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "desktop": "electron .",
+    "start": "electron .",
+    "check": "node scripts/check.js",
+    "build": "npm run check",
+    "package": "electron-builder --dir",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.rfpbidos.desktop",
+    "productName": "RFP BidOS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
+  }
+}

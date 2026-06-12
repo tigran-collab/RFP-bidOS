@@ -3,6 +3,7 @@ const navItems = [
   { key: "opportunities", label: "Opportunities" },
   { key: "newOpportunity", label: "New Opportunity" },
   { key: "reviewQueue", label: "Review Queue" },
+  { key: "localAIChat", label: "Local AI Chat" },
   { key: "scraper", label: "Scraper" },
   { key: "settings", label: "Settings" },
 ];

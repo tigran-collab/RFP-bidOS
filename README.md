@@ -90,6 +90,50 @@ http://localhost:5173
 
 ## Desktop Launcher
 
+Cross-platform Electron launcher:
+
+```bash
+cd desktop
+npm install
+npm run desktop
+```
+
+Manual prerequisites:
+
+- Python 3.12+
+- Backend venv created at `backend/.venv`
+- Backend requirements installed
+- Frontend `npm install` completed
+- Ollama installed
+- `qwen3:8b` pulled
+
+Setup commands:
+
+```bash
+cd backend
+python -m pip install -r requirements.txt
+python -m app.cli init-db
+python -m app.cli seed-demo
+python -m app.cli seed-sources
+
+cd ../frontend
+npm install
+
+ollama pull qwen3:8b
+```
+
+The Electron launcher checks Ollama, starts local backend/frontend development servers, opens a desktop window titled `RFP BidOS`, and loads `http://localhost:5173`. It stops only the processes it started. It does not auto-pull Ollama models.
+
+Icon files can be placed in `desktop/assets/`:
+
+- `icon.png` for Linux and development fallback.
+- `icon.icns` for macOS packaging.
+- `icon.ico` for Windows packaging.
+
+Packaging commands are documented in `desktop/README.md`.
+
+Legacy script launchers:
+
 Double-click `start_rfp_bidos.bat` from the project root to start the app.
 
 The launcher opens two CMD windows:
@@ -171,6 +215,27 @@ If Ollama is off or the configured model is not installed, CLI/API/frontend surf
 `Local AI model is not available. Start Ollama and make sure the model is installed.`
 When Ollama is running but `qwen3:8b` is missing, `ai-status` also prints:
 `Configured model is not installed. Run: ollama pull qwen3:8b`
+
+## Local AI Chat
+
+The app includes a simple **Local AI Chat** page and an opportunity-aware chat panel on Opportunity Detail. Chat uses local Ollama only with the default model `qwen3:8b`; it does not use OpenAI APIs or cloud AI.
+
+Setup:
+
+```bash
+ollama pull qwen3:8b
+ollama serve
+```
+
+Then run the backend and frontend normally. The chat status endpoint checks `http://127.0.0.1:11434` and reports whether `qwen3:8b` is available.
+
+If Ollama is unavailable, the UI shows:
+
+```text
+Local AI model is not available. Start Ollama and make sure qwen3:8b is installed.
+```
+
+Chat answers are based only on available app data and local model reasoning. Verify official solicitation documents before acting.
 
 ## Parsing
 

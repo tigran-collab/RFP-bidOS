@@ -7,7 +7,7 @@ from app.config import get_settings
 
 
 LOCAL_AI_UNAVAILABLE = (
-    "Local AI model is not available. Start Ollama and make sure the model is installed."
+    "Local AI model is not available. Start Ollama and make sure qwen3:8b is installed."
 )
 
 
@@ -83,6 +83,29 @@ def generate_json(
         "json": parsed_json,
         "ollama": ollama_payload,
     }
+
+
+def generate_text(
+    prompt: str,
+    model: str | None = None,
+    temperature: float = 0.2,
+) -> str:
+    settings = get_settings()
+    model_name = model or settings.ollama_model
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    try:
+        response = requests.post(_api_url("/api/generate"), json=payload, timeout=120)
+        response.raise_for_status()
+        ollama_payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise LocalAIUnavailableError(LOCAL_AI_UNAVAILABLE) from exc
+
+    return str(ollama_payload.get("response", "")).strip()
 
 
 def _api_url(path: str) -> str:
