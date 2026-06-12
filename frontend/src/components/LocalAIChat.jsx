@@ -96,6 +96,16 @@ export default function LocalAIChat({
         mode: fixedOpportunityMode ? "opportunity" : contextMode,
       };
       const result = await sendAiChatMessage(message, requestContext);
+      if (result.error) {
+        setError(result.error);
+        setStatus((current) => ({
+          ...(current || {}),
+          available: result.available !== false,
+          model: result.model || current?.model || "qwen3:8b",
+        }));
+        setLastContextUsed(result.context_used || null);
+        return;
+      }
       if (!result.available) {
         setError(result.error || unavailableMessage);
         setStatus((current) => ({ ...(current || {}), available: false }));

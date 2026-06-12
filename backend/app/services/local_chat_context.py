@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -6,13 +7,13 @@ from sqlmodel import Session, select
 
 from app.models import Document, Opportunity, Requirement
 
-DEFAULT_OPPORTUNITY_LIMIT = 50
+DEFAULT_OPPORTUNITY_LIMIT = 25
 DEFAULT_CONTEXT_LIMIT = 25
 MAX_LIMIT = 50
-MAX_REQUIREMENTS_PER_OPPORTUNITY = 10
+MAX_REQUIREMENTS_PER_OPPORTUNITY = 5
 MAX_DOCUMENT_SNIPPETS = 3
 MAX_DOCUMENT_SNIPPET_CHARS = 1000
-MAX_CONTEXT_CHARS = 18000
+MAX_CONTEXT_CHARS = 16000
 
 AUTO_APP_TERMS = (
     "all opportunities",
@@ -82,23 +83,23 @@ def build_app_overview_context(session: Session, limit: int = DEFAULT_OPPORTUNIT
             "counts": _counts(compact),
             "no_bid_opportunities": [
                 _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
-                for opp in sorted(no_bid, key=_action_sort_key)[:25]
+                for opp in sorted(no_bid, key=_action_sort_key)[:10]
             ],
             "as_needed_risky_opportunities": [
                 _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
-                for opp in sorted(as_needed, key=_action_sort_key)[:25]
+                for opp in sorted(as_needed, key=_action_sort_key)[:10]
             ],
             "missing_deadline_opportunities": [
                 _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
-                for opp in sorted(missing_deadline, key=_action_sort_key)[:25]
+                for opp in sorted(missing_deadline, key=_action_sort_key)[:10]
             ],
             "mandatory_pre_bid_opportunities": [
                 _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
-                for opp in sorted(mandatory_pre_bid, key=_action_sort_key)[:25]
+                for opp in sorted(mandatory_pre_bid, key=_action_sort_key)[:10]
             ],
             "needs_document_review": [
                 _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
-                for opp in sorted(needs_document_review, key=_action_sort_key)[:25]
+                for opp in sorted(needs_document_review, key=_action_sort_key)[:10]
             ],
         }
     )
@@ -306,9 +307,6 @@ def _compact_opportunity(
         "title": opportunity.title,
         "agency": opportunity.agency,
         "solicitation_number": opportunity.solicitation_number,
-        "source_name": opportunity.source,
-        "source_url": opportunity.source_url,
-        "portal_url": opportunity.portal_url,
         "location": opportunity.location,
         "due_date": _jsonable(opportunity.due_date),
         "q_and_a_deadline": _jsonable(opportunity.q_and_a_deadline),
@@ -331,10 +329,7 @@ def _compact_opportunity(
         "as_needed_warning": opportunity.as_needed_warning,
         "deadline_risk": opportunity.deadline_risk,
         "logistics_confidence_score": opportunity.logistics_confidence_score,
-        "missing_logistics_flags": _missing_logistics_flags(opportunity, docs),
         "document_count": len(docs),
-        "downloaded_document_count": sum(1 for doc in docs if doc.path),
-        "parsed_document_count": sum(1 for doc in docs if doc.parsed_status == "Parsed"),
         "requirement_count": len(requirements),
     }
 
@@ -449,22 +444,34 @@ def _action_sort_key(opportunity: Opportunity) -> tuple:
 
 
 def _guard_context(context: dict) -> dict:
-    text = str(context)
+    text = _json_text(context)
     if len(text) <= MAX_CONTEXT_CHARS:
         return context
     if "opportunities" in context:
-        while len(str(context)) > MAX_CONTEXT_CHARS and len(context["opportunities"]) > 5:
+        while len(_json_text(context)) > MAX_CONTEXT_CHARS and len(context["opportunities"]) > 5:
             context["opportunities"].pop()
         context["context_truncated"] = True
         context["opportunity_count"] = len(context["opportunities"])
     if "requirements" in context:
-        while len(str(context)) > MAX_CONTEXT_CHARS and context["requirements"]:
+        while len(_json_text(context)) > MAX_CONTEXT_CHARS and context["requirements"]:
             context["requirements"].pop()
         context["context_truncated"] = True
     if "documents" in context:
         for document in context["documents"]:
             document["snippet"] = _truncate(document.get("snippet", ""), 300)
         context["context_truncated"] = True
+    for key in [
+        "no_bid_opportunities",
+        "as_needed_risky_opportunities",
+        "missing_deadline_opportunities",
+        "mandatory_pre_bid_opportunities",
+        "needs_document_review",
+        "upcoming_deadlines",
+        "missing_deadlines",
+    ]:
+        while len(_json_text(context)) > MAX_CONTEXT_CHARS and len(context.get(key, [])) > 3:
+            context[key].pop()
+            context["context_truncated"] = True
     return context
 
 
@@ -510,3 +517,7 @@ def _truncate(value: str, limit: int) -> str:
 
 def _jsonable(value: Any) -> Any:
     return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _json_text(context: dict) -> str:
+    return json.dumps(context, ensure_ascii=True, default=str, separators=(",", ":"))

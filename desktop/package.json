@@ -7,6 +7,7 @@
   "scripts": {
     "desktop": "electron .",
     "start": "electron .",
+    "doctor": "node doctor.js",
     "check": "node scripts/check.js",
     "build": "npm run check",
     "package": "electron-builder --dir",
@@ -27,6 +28,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "status.html",
+      "status-preload.js",
       "assets/**/*",
       "package.json"
     ],

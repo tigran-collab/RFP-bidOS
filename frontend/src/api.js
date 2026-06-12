@@ -7,7 +7,7 @@ async function request(path, options = {}) {
     let detail = `API request failed: ${response.status}`;
     try {
       const payload = await response.json();
-      detail = payload.detail || detail;
+      detail = payload.error || payload.detail || detail;
     } catch {
       detail = `API request failed: ${response.status}`;
     }

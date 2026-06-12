@@ -7,14 +7,27 @@ const path = require("node:path");
 const APP_TITLE = "RFP BidOS";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_MODEL = "qwen3:8b";
-const OLLAMA_START_TIMEOUT_MS = 60000;
+const OLLAMA_START_TIMEOUT_MS = 30000;
+const BACKEND_START_TIMEOUT_MS = 30000;
+const FRONTEND_START_TIMEOUT_MS = 45000;
 const BACKEND_URL = "http://127.0.0.1:8000";
 const FRONTEND_URL = "http://localhost:5173";
 
 const desktopDir = __dirname;
-const rootDir = path.resolve(desktopDir, "..");
-const backendDir = path.join(rootDir, "backend");
-const frontendDir = path.join(rootDir, "frontend");
+const appRoot = path.resolve(desktopDir, "..");
+const backendDir = path.join(appRoot, "backend");
+const frontendDir = path.join(appRoot, "frontend");
+const logsDir = path.join(desktopDir, "logs");
+const launchLogPath = path.join(logsDir, "launch.log");
+
+const steps = [
+  "Checking Ollama",
+  "Starting Ollama if needed",
+  `Checking ${OLLAMA_MODEL} model`,
+  "Starting backend",
+  "Starting frontend",
+  "Opening RFP BidOS",
+].map((label) => ({ label, status: "pending", detail: "" }));
 
 const started = {
   ollama: null,
@@ -24,90 +37,83 @@ const started = {
 
 let mainWindow = null;
 let shuttingDown = false;
+let cleanedUp = false;
 
 function iconPath() {
-  const candidates = [
-    path.join(desktopDir, "assets", process.platform === "darwin" ? "icon.icns" : ""),
-    path.join(desktopDir, "assets", process.platform === "win32" ? "icon.ico" : ""),
-    path.join(desktopDir, "assets", "icon.png"),
-  ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate));
+  const candidates = process.platform === "win32"
+    ? [path.join(desktopDir, "assets", "icon.ico"), path.join(desktopDir, "assets", "icon.png")]
+    : process.platform === "darwin"
+      ? [path.join(desktopDir, "assets", "icon.icns"), path.join(desktopDir, "assets", "icon.png")]
+      : [path.join(desktopDir, "assets", "icon.png")];
+  return candidates.find((candidate) => isFile(candidate));
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const icon = iconPath();
+  const windowOptions = {
     width: 1280,
     height: 860,
     title: APP_TITLE,
-    icon: iconPath(),
     webPreferences: {
-      preload: path.join(desktopDir, "preload.js"),
+      preload: path.join(desktopDir, "status-preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  };
+  if (icon) {
+    windowOptions.icon = icon;
+  }
+
+  logEvent("launcher:start", {
+    platform: process.platform,
+    appRoot,
+    node: process.version,
+    electron: process.versions.electron,
+    icon: icon || "(omitted)",
   });
+  mainWindow = new BrowserWindow(windowOptions);
   mainWindow.setTitle(APP_TITLE);
-  showStatus("Starting RFP BidOS", "Checking local services...");
+  return mainWindow.loadFile(path.join(desktopDir, "status.html")).then(() => {
+    sendStartupStatus({
+      title: "Starting RFP BidOS",
+      message: "Preparing local services...",
+      steps,
+    });
+  });
 }
 
-function html(title, message, detail = "") {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${escapeHtml(APP_TITLE)}</title>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f6f7f9;
-      color: #172033;
-    }
-    main {
-      width: min(560px, calc(100vw - 48px));
-      border: 1px solid #d8dee8;
-      border-radius: 8px;
-      background: #ffffff;
-      padding: 28px;
-      box-shadow: 0 12px 40px rgba(20, 32, 50, 0.10);
-    }
-    h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: 0; }
-    p { margin: 8px 0; line-height: 1.45; }
-    pre {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      padding: 12px;
-      border-radius: 6px;
-      background: #eef2f7;
-      color: #202a3a;
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>${escapeHtml(title)}</h1>
-    <p>${escapeHtml(message)}</p>
-    ${detail ? `<pre>${escapeHtml(detail)}</pre>` : ""}
-  </main>
-</body>
-</html>`;
+function setStep(label, status, detail = "") {
+  const step = steps.find((item) => item.label === label || item.label.startsWith(label));
+  if (step) {
+    step.status = status;
+    step.detail = detail;
+  }
+  logEvent("step", { label, status, detail });
+  sendStartupStatus({
+    step: step?.label || label,
+    status,
+    message: detail || label,
+    steps,
+  });
 }
 
-function showStatus(title, message, detail = "") {
+function showFailure(title, message, detail = "") {
+  logEvent("failure", { title, message, detail });
+  const failedStep = steps.find((step) => step.status === "failed");
+  sendStartupStatus({
+    title,
+    step: failedStep?.label || "Startup",
+    status: "error",
+    message,
+    error: message,
+    detail,
+    steps,
+  });
+}
+
+function sendStartupStatus(payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html(title, message, detail))}`);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  mainWindow.webContents.send("startup-status", payload);
 }
 
 function commandExists(command) {
@@ -115,15 +121,8 @@ function commandExists(command) {
 }
 
 function resolveCommand(command) {
-  const checker = process.platform === "win32" ? "where" : "command";
-  const args = process.platform === "win32" ? [command] : ["-v", command];
-  const options = process.platform === "win32" ? {} : { shell: true };
-  const result = spawnSync(checker, args, { ...options, encoding: "utf8" });
-  if (result.status === 0) {
-    const firstLine = String(result.stdout || "").split(/\r?\n/).find(Boolean);
-    return firstLine || command;
-  }
-
+  const fromPath = findCommandOnPath(command);
+  if (fromPath) return fromPath;
   for (const candidate of commandCandidates(command)) {
     if (candidate && fs.existsSync(candidate)) {
       return candidate;
@@ -161,24 +160,35 @@ function pythonPath() {
 
 function checkPrerequisites() {
   const missing = [];
-  if (!fs.existsSync(path.join(backendDir, ".venv"))) {
-    missing.push("backend/.venv is missing. Create it with Python 3.12+ and install backend requirements.");
-  }
   if (!fs.existsSync(pythonPath())) {
-    missing.push(`Python venv executable is missing: ${path.relative(rootDir, pythonPath())}`);
+    missing.push(venvMissingMessage());
+  }
+  if (!fs.existsSync(path.join(frontendDir, "package.json"))) {
+    missing.push("frontend/package.json is missing.");
   }
   if (!fs.existsSync(path.join(frontendDir, "node_modules"))) {
-    missing.push("frontend/node_modules is missing. Run: cd frontend && npm install");
+    missing.push("Frontend dependencies are missing.\nRun: cd frontend && npm install");
   }
   if (!commandExists(process.platform === "win32" ? "npm.cmd" : "npm")) {
     missing.push("npm is not installed or not on PATH.");
   }
-  if (!commandExists("ollama")) {
-    missing.push("Ollama is not installed or not on PATH.");
-  }
   if (missing.length) {
-    throw new Error(`${missing.join("\n")}\n\nRequired setup:\ncd backend\npython -m pip install -r requirements.txt\npython -m app.cli init-db\npython -m app.cli seed-demo\npython -m app.cli seed-sources\n\ncd ../frontend\nnpm install\n\nollama pull ${OLLAMA_MODEL}`);
+    logEvent("preflight:failed", { missing });
+    throw new Error(missing.join("\n\n"));
   }
+  logEvent("preflight:passed", {
+    backendPython: pythonPath(),
+    frontendPackage: path.join(frontendDir, "package.json"),
+    frontendNodeModules: path.join(frontendDir, "node_modules"),
+    npm: resolveCommand(process.platform === "win32" ? "npm.cmd" : "npm"),
+  });
+}
+
+function venvMissingMessage() {
+  if (process.platform === "win32") {
+    return "Backend virtual environment is missing.\nRun: cd backend && python -m venv .venv && .venv\\Scripts\\activate.bat && python -m pip install -r requirements.txt";
+  }
+  return "Backend virtual environment is missing.\nRun: cd backend && python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements.txt";
 }
 
 function getJson(url, timeoutMs = 3000) {
@@ -235,98 +245,121 @@ function waitForUrl(url, timeoutMs, label) {
 }
 
 async function ensureOllama() {
-  showStatus("Starting RFP BidOS", "Checking Ollama...");
+  setStep("Checking Ollama", "running", "Checking Ollama API...");
   let tags = await tryOllamaTags();
-  if (!tags) {
+  if (tags) {
+    setStep("Checking Ollama", "done", "Ollama is already running.");
+  } else {
+    setStep("Checking Ollama", "done", "Ollama API is not reachable.");
+    setStep("Starting Ollama if needed", "running", "Starting ollama serve...");
     const ollamaCommand = resolveCommand("ollama");
     if (!ollamaCommand) {
-      throw new Error("Ollama is not installed or not on PATH. Install Ollama, then run: ollama pull qwen3:8b");
+      setStep("Starting Ollama if needed", "failed", "Ollama is not installed or not in PATH.");
+      throw new Error(`Ollama is not installed or not in PATH.\nInstall Ollama, then run: ollama pull ${OLLAMA_MODEL}`);
     }
-    showStatus("Starting RFP BidOS", "Ollama is not reachable. Starting ollama serve...");
-    started.ollama = spawn(ollamaCommand, ["serve"], {
-      cwd: rootDir,
+    started.ollama = spawnLogged("Ollama", ollamaCommand, ["serve"], {
+      cwd: appRoot,
+      shell: process.platform === "win32",
       env: process.env,
       stdio: "pipe",
-      windowsHide: true,
+      windowsHide: false,
     });
-    attachProcessLogging("Ollama", started.ollama);
     try {
       await waitForUrl(`${OLLAMA_BASE_URL}/api/tags`, OLLAMA_START_TIMEOUT_MS, "Ollama");
+      setStep("Starting Ollama if needed", "done", "Ollama started.");
     } catch (error) {
-      const output = started.ollama._rfpOutput || "";
-      throw new Error(
-        `${error.message}\n\nThe launcher tried to start Ollama with:\n${ollamaCommand} serve` +
-          (output ? `\n\nOllama output:\n${output}` : "")
-      );
+      setStep("Starting Ollama if needed", "failed", "Ollama could not be started.");
+      throw new Error("Ollama could not be started. Install Ollama or start it manually, then relaunch RFP BidOS.");
     }
     tags = await tryOllamaTags();
   }
 
-  const names = Array.isArray(tags?.models)
-    ? tags.models.map((model) => model.name || model.model).filter(Boolean)
-    : [];
-  if (!names.includes(OLLAMA_MODEL)) {
-    throw new Error(`Ollama is running, but ${OLLAMA_MODEL} is not installed. Run: ollama pull ${OLLAMA_MODEL}`);
+  setStep(`Checking ${OLLAMA_MODEL} model`, "running", `Checking for ${OLLAMA_MODEL}...`);
+  const names = modelNames(tags);
+  logEvent("ollama:models", { names });
+  if (!hasRequiredModel(names)) {
+    setStep(`Checking ${OLLAMA_MODEL} model`, "failed", `${OLLAMA_MODEL} is not installed.`);
+    throw new Error(`Ollama is running, but ${OLLAMA_MODEL} is not installed.\nRun this command once: ollama pull ${OLLAMA_MODEL}`);
   }
+  setStep(`Checking ${OLLAMA_MODEL} model`, "done", `${OLLAMA_MODEL} is available.`);
 }
 
 async function tryOllamaTags() {
   try {
     return await getJson(`${OLLAMA_BASE_URL}/api/tags`, 3000);
-  } catch {
+  } catch (error) {
+    logEvent("ollama:tags-unreachable", { message: error.message });
     return null;
   }
 }
 
+function modelNames(tags) {
+  return Array.isArray(tags?.models)
+    ? tags.models.map((model) => model.name || model.model).filter(Boolean)
+    : [];
+}
+
+function hasRequiredModel(names) {
+  return names.some((name) => {
+    const normalized = String(name).toLowerCase();
+    return normalized === OLLAMA_MODEL || normalized === `${OLLAMA_MODEL}-latest` || normalized === "qwen3";
+  });
+}
+
 async function ensureBackend() {
-  showStatus("Starting RFP BidOS", "Checking backend...");
+  setStep("Starting backend", "running", "Checking FastAPI backend...");
   const backendHealthReady = await urlReady(`${BACKEND_URL}/health`);
   if (backendHealthReady && await urlReady(`${BACKEND_URL}/ai/chat/status`)) {
+    setStep("Starting backend", "done", "Backend is already running.");
     return;
   }
   if (backendHealthReady) {
-    throw new Error(
-      "A backend is already running on 127.0.0.1:8000, but it does not have the Local AI Chat endpoints. Stop the old backend process and relaunch RFP BidOS."
-    );
+    setStep("Starting backend", "failed", "Another backend is running on port 8000.");
+    throw new Error("A backend is already running on 127.0.0.1:8000, but it does not have the Local AI Chat endpoints. Stop the old backend process and relaunch RFP BidOS.");
   }
 
-  showStatus("Starting RFP BidOS", "Starting FastAPI backend...");
-  if (process.platform === "win32") {
-    started.backend = spawn("cmd.exe", ["/d", "/s", "/c", [
-      ".venv\\Scripts\\activate.bat",
-      `set OLLAMA_BASE_URL=${OLLAMA_BASE_URL}`,
-      `set OLLAMA_MODEL=${OLLAMA_MODEL}`,
-      "uvicorn app.main:app --host 127.0.0.1 --port 8000",
-    ].join(" && ")], {
-      cwd: backendDir,
-      env: process.env,
-      stdio: "pipe",
-      windowsHide: true,
-    });
-  } else {
-    started.backend = spawn("bash", ["-lc", [
-      "source .venv/bin/activate",
-      `export OLLAMA_BASE_URL=${OLLAMA_BASE_URL}`,
-      `export OLLAMA_MODEL=${OLLAMA_MODEL}`,
-      "uvicorn app.main:app --host 127.0.0.1 --port 8000",
-    ].join(" && ")], {
-      cwd: backendDir,
-      env: process.env,
-      stdio: "pipe",
-    });
+  started.backend = spawnLogged("Backend", pythonPath(), [
+    "-m",
+    "uvicorn",
+    "app.main:app",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000",
+  ], {
+    cwd: backendDir,
+    shell: false,
+    env: {
+      ...process.env,
+      OLLAMA_BASE_URL,
+      OLLAMA_MODEL,
+    },
+    stdio: "pipe",
+    windowsHide: true,
+  });
+  try {
+    await waitForUrl(`${BACKEND_URL}/health`, BACKEND_START_TIMEOUT_MS, "Backend");
+    setStep("Starting backend", "done", "Backend is ready.");
+  } catch (error) {
+    setStep("Starting backend", "failed", "Backend could not be started.");
+    const detail = processLogDetail(started.backend._rfpSpawnInfo, `Error: ${error.message}`, started.backend._rfpStderr || started.backend._rfpOutput || "");
+    throw new Error(`Backend could not be started.\n\n${detail}`);
   }
-  attachProcessLogging("Backend", started.backend);
-  await waitForUrl(`${BACKEND_URL}/health`, 30000, "Backend");
 }
 
 async function ensureFrontend() {
-  showStatus("Starting RFP BidOS", "Checking frontend...");
-  if (await urlReady(FRONTEND_URL)) return;
+  setStep("Starting frontend", "running", "Checking Vite frontend...");
+  if (await urlReady(FRONTEND_URL)) {
+    setStep("Starting frontend", "done", "Frontend is already running.");
+    return;
+  }
 
-  showStatus("Starting RFP BidOS", "Starting Vite frontend...");
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  started.frontend = spawn(npmCommand, ["run", "dev"], {
+  const npmCommand = resolveCommand(process.platform === "win32" ? "npm.cmd" : "npm") || (process.platform === "win32" ? "npm.cmd" : "npm");
+  const frontendCommand = process.platform === "win32" ? "cmd.exe" : npmCommand;
+  const frontendArgs = process.platform === "win32" ? ["/d", "/c", "npm.cmd run dev"] : ["run", "dev"];
+  started.frontend = spawnLogged("Frontend", frontendCommand, frontendArgs, {
     cwd: frontendDir,
+    shell: false,
     env: {
       ...process.env,
       VITE_API_BASE_URL: BACKEND_URL,
@@ -334,8 +367,14 @@ async function ensureFrontend() {
     stdio: "pipe",
     windowsHide: true,
   });
-  attachProcessLogging("Frontend", started.frontend);
-  await waitForUrl(FRONTEND_URL, 30000, "Frontend");
+  try {
+    await waitForUrl(FRONTEND_URL, FRONTEND_START_TIMEOUT_MS, "Frontend");
+    setStep("Starting frontend", "done", "Frontend is ready.");
+  } catch (error) {
+    setStep("Starting frontend", "failed", "Frontend could not be started.");
+    const detail = processLogDetail(started.frontend._rfpSpawnInfo, `Error: ${error.message}`, started.frontend._rfpStderr || started.frontend._rfpOutput || "");
+    throw new Error(`Frontend could not be started. Run npm install in the frontend folder and relaunch.\n\n${detail}`);
+  }
 }
 
 async function urlReady(url) {
@@ -347,24 +386,202 @@ async function urlReady(url) {
   }
 }
 
-function attachProcessLogging(label, child) {
-  let output = "";
-  const append = (chunk) => {
-    output = `${output}${chunk.toString()}`.slice(-8000);
-    child._rfpOutput = output;
+function spawnLogged(label, command, args, options) {
+  const spawnInfo = buildProcessInfo(label, command, args, options);
+  logEvent(`${label}:spawn`, spawnInfo);
+  let child;
+  try {
+    child = spawn(command, args, options);
+  } catch (error) {
+    logProcessError(label, error, spawnInfo);
+    throw error;
+  }
+  child._rfpSpawnInfo = spawnInfo;
+  attachProcessLogging(label, child, spawnInfo);
+  return child;
+}
+
+function spawnSyncLogged(label, command, args, options = {}) {
+  const spawnInfo = buildProcessInfo(label, command, args, options);
+  logEvent(`${label}:spawnSync`, spawnInfo);
+  let result;
+  try {
+    result = spawnSync(command, args, options);
+  } catch (error) {
+    logProcessError(label, error, spawnInfo);
+    throw error;
+  }
+  if (result.error) {
+    logProcessError(label, result.error, spawnInfo);
+  }
+  if (result.status !== 0 || result.error) {
+    logEvent(`${label}:spawnSync-result`, {
+      status: result.status,
+      signal: result.signal || null,
+      stderr: truncate(result.stderr),
+      stdout: truncate(result.stdout),
+    });
+  }
+  return result;
+}
+
+function buildProcessInfo(label, command, args = [], options = {}) {
+  return {
+    label,
+    command: String(command),
+    args: Array.isArray(args) ? args.map(String) : args,
+    formattedCommand: formatCommand(command, args),
+    cwd: options.cwd || process.cwd(),
+    shell: options.shell === undefined ? false : options.shell,
+    detached: options.detached === undefined ? false : options.detached,
+    platform: process.platform,
+    pathPresent: Boolean((options.env || process.env).PATH || (options.env || process.env).Path),
+    pathLength: String((options.env || process.env).PATH || (options.env || process.env).Path || "").length,
+    targetExists: commandTargetExists(command),
   };
-  child.stdout?.on("data", append);
-  child.stderr?.on("data", append);
+}
+
+function formatCommand(command, args = []) {
+  return [command, ...args].map((part) => {
+    const value = String(part);
+    return /\s/.test(value) ? `"${value}"` : value;
+  }).join(" ");
+}
+
+function attachProcessLogging(label, child, spawnInfo) {
+  let output = "";
+  let stderr = "";
+  const append = (stream, chunk) => {
+    const text = chunk.toString();
+    output = `${output}${text}`.slice(-12000);
+    child._rfpOutput = output;
+    if (stream === "stderr") {
+      stderr = `${stderr}${text}`.slice(-12000);
+      child._rfpStderr = stderr;
+    }
+    logEvent(`${label}:${stream}`, { text: truncate(text) });
+  };
+  child.stdout?.on("data", (chunk) => append("stdout", chunk));
+  child.stderr?.on("data", (chunk) => append("stderr", chunk));
   child.on("exit", (code, signal) => {
+    logEvent(`${label}:exit`, { code, signal: signal || null, output: truncate(output), stderr: truncate(stderr) });
     if (!shuttingDown && code !== 0 && code !== null) {
-      showStatus(`${label} stopped`, `${label} exited before the launcher closed.`, `Exit code: ${code}\nSignal: ${signal || "-"}\n\n${output}`);
+      const detail = processLogDetail(spawnInfo, `Exit code: ${code}\nSignal: ${signal || "-"}`, stderr || output);
+      showFailure(`${label} stopped`, `${label} exited before the launcher closed.`, detail);
     }
   });
   child.on("error", (error) => {
     if (!shuttingDown) {
-      showStatus(`${label} failed`, error.message);
+      const detail = processLogDetail(spawnInfo, `Error: ${error.message}`, stderr);
+      logProcessError(label, error, spawnInfo);
+      showFailure(`${label} failed`, error.message, detail);
     }
   });
+}
+
+function processLogDetail(spawnInfo, message, stderr = "") {
+  return [
+    `Label: ${spawnInfo.label}`,
+    `Command: ${spawnInfo.formattedCommand || spawnInfo.command}`,
+    `CWD: ${spawnInfo.cwd}`,
+    `Shell: ${spawnInfo.shell}`,
+    `Detached: ${spawnInfo.detached}`,
+    `Platform: ${spawnInfo.platform}`,
+    `PATH present: ${spawnInfo.pathPresent}`,
+    `PATH length: ${spawnInfo.pathLength}`,
+    `Target exists: ${spawnInfo.targetExists}`,
+    message,
+    stderr ? `stderr:\n${stderr}` : "stderr: -",
+  ].join("\n");
+}
+
+function logProcessError(label, error, spawnInfo) {
+  logEvent(`${label}:error`, {
+    label,
+    command: spawnInfo?.formattedCommand || spawnInfo?.command,
+    cwd: spawnInfo?.cwd,
+    shell: spawnInfo?.shell,
+    detached: spawnInfo?.detached,
+    platform: process.platform,
+    targetExists: spawnInfo?.targetExists,
+    errorName: error.name,
+    errorCode: error.code,
+    errorErrno: error.errno,
+    errorSyscall: error.syscall,
+    errorPath: error.path,
+    errorSpawnargs: error.spawnargs,
+    errorMessage: error.message,
+    stack: error.stack,
+  });
+}
+
+function logEvent(label, detail = {}) {
+  const entry = `[${new Date().toISOString()}] ${label}\n${JSON.stringify(detail, null, 2)}\n`;
+  console.log(entry);
+  try {
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.appendFileSync(launchLogPath, entry, "utf8");
+  } catch {
+    // Console logging still works if the log file cannot be written.
+  }
+}
+
+function commandTargetExists(command) {
+  if (!command) return false;
+  const value = String(command);
+  if (path.isAbsolute(value) || value.includes(path.sep) || value.includes("/") || value.includes("\\")) {
+    return fs.existsSync(value);
+  }
+  if (process.platform === "win32") {
+    const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+    const names = path.extname(value) ? [value] : [value, ...extensions.map((ext) => `${value}${ext.toLowerCase()}`), ...extensions.map((ext) => `${value}${ext.toUpperCase()}`)];
+    return Boolean(findOnPath(names));
+  }
+  return Boolean(findOnPath([value]));
+}
+
+function findCommandOnPath(command) {
+  if (!command) return null;
+  const value = String(command);
+  if (path.isAbsolute(value) || value.includes(path.sep) || value.includes("/") || value.includes("\\")) {
+    return fs.existsSync(value) ? value : null;
+  }
+  if (process.platform === "win32") {
+    const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+    const names = path.extname(value) ? [value] : [
+      value,
+      ...extensions.map((ext) => `${value}${ext.toLowerCase()}`),
+      ...extensions.map((ext) => `${value}${ext.toUpperCase()}`),
+    ];
+    return findOnPath(names);
+  }
+  return findOnPath([value]);
+}
+
+function findOnPath(names) {
+  const pathValue = process.env.PATH || process.env.Path || "";
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function isFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function truncate(value) {
+  if (!value) return "";
+  return String(value).slice(-4000);
 }
 
 async function start() {
@@ -373,32 +590,44 @@ async function start() {
     await ensureOllama();
     await ensureBackend();
     await ensureFrontend();
-    showStatus("Opening RFP BidOS", "Loading desktop window...");
+    setStep("Opening RFP BidOS", "running", "Loading app window...");
     await mainWindow.loadURL(FRONTEND_URL);
     mainWindow.setTitle(APP_TITLE);
+    const step = steps.find((item) => item.label === "Opening RFP BidOS");
+    if (step) {
+      step.status = "done";
+      step.detail = "RFP BidOS is open.";
+    }
+    logEvent("step", { label: "Opening RFP BidOS", status: "done", detail: "RFP BidOS is open." });
   } catch (error) {
-    showStatus("RFP BidOS could not start", error.message);
+    logProcessError("Launcher", error, { label: "Launcher", formattedCommand: "startup", cwd: appRoot, shell: false, detached: false, platform: process.platform, targetExists: true });
+    showFailure("RFP BidOS could not start", error.message);
   }
 }
 
-function stopChild(child) {
-  if (!child || child.killed) return;
+function stopChild(label, child) {
+  if (!child || child.killed || !child.pid) return;
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
+    spawnSyncLogged(`Cleanup ${label}`, "taskkill.exe", ["/pid", String(child.pid), "/T", "/F"], {
+      windowsHide: true,
+      encoding: "utf8",
+    });
     return;
   }
   child.kill("SIGTERM");
 }
 
 function cleanup() {
+  if (cleanedUp) return;
+  cleanedUp = true;
   shuttingDown = true;
-  stopChild(started.frontend);
-  stopChild(started.backend);
-  stopChild(started.ollama);
+  stopChild("frontend", started.frontend);
+  stopChild("backend", started.backend);
+  stopChild("ollama", started.ollama);
 }
 
-app.whenReady().then(() => {
-  createWindow();
+app.whenReady().then(async () => {
+  await createWindow();
   start();
 });
 
@@ -408,3 +637,11 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", cleanup);
+process.on("SIGINT", () => {
+  cleanup();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  cleanup();
+  process.exit(0);
+});

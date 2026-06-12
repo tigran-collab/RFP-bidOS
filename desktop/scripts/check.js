@@ -5,6 +5,8 @@ const { spawnSync } = require("node:child_process");
 const required = [
   "main.js",
   "preload.js",
+  "status.html",
+  "status-preload.js",
   "package.json",
   "assets/README.md",
 ];
@@ -17,13 +19,17 @@ for (const file of required) {
   }
 }
 
-for (const file of ["main.js", "preload.js"]) {
+for (const file of ["main.js", "preload.js", "status-preload.js"]) {
   const fullPath = path.join(__dirname, "..", file);
   const result = spawnSync(process.execPath, ["--check", fullPath], {
     encoding: "utf8",
   });
+  if (result.error) {
+    console.error(result.error.message);
+    process.exit(1);
+  }
   if (result.status !== 0) {
-    process.stderr.write(result.stderr || result.stdout);
+    process.stderr.write(result.stderr || result.stdout || `Syntax check failed for ${file}\n`);
     process.exit(result.status || 1);
   }
 }
