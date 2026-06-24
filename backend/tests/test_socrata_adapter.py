@@ -79,6 +79,36 @@ def test_scrape_maps_filters_and_parses(monkeypatch):
     assert bid.portal_url == "https://citydata.mesaaz.gov/d/dfcn-ivuc"
 
 
+def test_url_dict_cell_is_extracted(monkeypatch):
+    # Socrata URL columns arrive as {"url": "..."}; the adapter must flatten them.
+    adapter = SocrataAdapter()
+    config = {
+        "domain": "data.lacity.org",
+        "dataset_id": "hf3r-utnq",
+        "status_field": "stagename",
+        "open_statuses": ["Open"],
+        "agency": "City of Los Angeles (RAMP)",
+        "field_map": {
+            "title": "title",
+            "solicitation_number": "rampid",
+            "due_date": "closedate",
+            "detail_url": "url",
+        },
+    }
+    row = {
+        "rampid": "230596",
+        "title": "Armed & Unarmed Contract Security Services",
+        "stagename": "Open",
+        "closedate": "2026-07-29T21:00:00.000",
+        "url": {"url": "https://www.rampla.org/s/opportunity-details?id=abc"},
+    }
+    monkeypatch.setattr(adapter, "_fetch_rows", lambda *a, **k: [row])
+    results = adapter.scrape(make_source(config))
+    assert len(results) == 1
+    assert results[0].detail_url == "https://www.rampla.org/s/opportunity-details?id=abc"
+    assert results[0].source_url == "https://www.rampla.org/s/opportunity-details?id=abc"
+
+
 def test_missing_required_config_raises(monkeypatch):
     adapter = SocrataAdapter()
     bad = SimpleNamespace(source_type="socrata", name="x", config_json=json.dumps({"domain": "d"}))

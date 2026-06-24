@@ -29,6 +29,39 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "notes": "California state procurement public search. JavaScript portal; HTML scraper gets limited results. Review manually.",
     },
     {
+        "name": "City of Los Angeles - RAMP Open Bid Opportunities (Open Data)",
+        "base_url": "https://data.lacity.org/d/hf3r-utnq",
+        "portal_type": "Socrata Open Data",
+        "state": "CA",
+        "enabled": True,
+        "source_type": "socrata",
+        "notes": (
+            "City of LA open bid opportunities (RAMP) via the Socrata public "
+            "SODA API (sanctioned, no key). Detail links point to rampla.org. "
+            "The relevance filter keeps only security-services rows."
+        ),
+        "config_json": json.dumps(
+            {
+                "domain": "data.lacity.org",
+                "dataset_id": "hf3r-utnq",
+                "limit": 500,
+                "order": "bidpost DESC",
+                "status_field": "stagename",
+                "open_statuses": ["Open"],
+                "agency": "City of Los Angeles (RAMP)",
+                "field_map": {
+                    "title": "title",
+                    "solicitation_number": "rampid",
+                    "contract_type": "type",
+                    "service_type": "category",
+                    "due_date": "closedate",
+                    "detail_url": "url",
+                    "description": "title",
+                },
+            }
+        ),
+    },
+    {
         "name": "Los Angeles County - Doing Business",
         "base_url": "https://doingbusiness.lacounty.gov/",
         "portal_type": "Generic Public",

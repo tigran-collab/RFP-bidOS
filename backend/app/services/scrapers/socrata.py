@@ -109,8 +109,8 @@ class SocrataAdapter:
             column = field_map.get(field)
             if not column:
                 return None
-            value = row.get(column)
-            if value is None:
+            value = _coerce_cell(row.get(column))
+            if value is None or value == "":
                 return None
             return normalize_space(str(value))
 
@@ -131,6 +131,17 @@ class SocrataAdapter:
             raw_text=title,
             confidence_score=0.6,
         )
+
+
+def _coerce_cell(value):
+    """Flatten Socrata composite cell types to a scalar.
+
+    URL columns return {"url": "..."}; location columns return
+    {"human_address": "...", ...}. Everything else passes through.
+    """
+    if isinstance(value, dict):
+        return value.get("url") or value.get("human_address") or ""
+    return value
 
 
 def _load_config(source_config) -> dict:
