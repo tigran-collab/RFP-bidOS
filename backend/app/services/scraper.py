@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import Document, Opportunity
-from app.services.scrapers import GenericPublicAdapter, ScraperResult
+from app.services.scrapers import GenericPublicAdapter, ScraperResult, SocrataAdapter
 from app.services.scrapers.extraction_utils import (
     extract_document_candidates,
     is_document_url,
@@ -114,12 +114,8 @@ def _scrape_candidates(
         result["errors"].append("Source has no base_url")
         return []
 
-    adapter = (
-        GenericPublicAdapter(detail_limit=detail_limit)
-        if detail_limit is not None
-        else GenericPublicAdapter()
-    )
-    if not adapter.can_handle(source_config):
+    adapter = _select_adapter(source_config, detail_limit)
+    if adapter is None or not adapter.can_handle(source_config):
         result["errors"].append(f"Unsupported source type: {source_config.source_type}")
         return []
 
@@ -130,6 +126,20 @@ def _scrape_candidates(
     except Exception as exc:
         result["errors"].append(f"Scraper failed: {exc}")
     return []
+
+
+def _select_adapter(source_config, detail_limit: int | None):
+    """Pick the scraper adapter for a source by its source_type.
+
+    Defaults to the generic public-HTML adapter so existing public_page,
+    table_listing, and portal_listing sources keep working unchanged.
+    """
+    source_type = (getattr(source_config, "source_type", "") or "").lower()
+    if source_type == "socrata":
+        return SocrataAdapter()
+    if detail_limit is not None:
+        return GenericPublicAdapter(detail_limit=detail_limit)
+    return GenericPublicAdapter()
 
 
 def discover_documents_for_opportunity(opportunity_id: int, session) -> dict:

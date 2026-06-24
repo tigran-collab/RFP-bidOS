@@ -9,6 +9,8 @@ Rules:
   and are never duplicated.
 """
 
+import json
+
 from sqlmodel import Session, select
 
 from app.models import SourceConfig
@@ -182,6 +184,47 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "notes": "Arizona state procurement portal. JavaScript single-page app; limited HTML scraping. Review manually.",
     },
     {
+        "name": "City of Mesa, AZ - Purchasing Solicitations (Open Data)",
+        "base_url": "https://citydata.mesaaz.gov/d/dfcn-ivuc",
+        "portal_type": "Socrata Open Data",
+        "state": "AZ",
+        "enabled": True,
+        "source_type": "socrata",
+        "notes": (
+            "Mesa AZ purchasing solicitations via the Socrata public SODA API "
+            "(sanctioned, no key required). The relevance filter keeps only "
+            "security-services rows."
+        ),
+        "config_json": json.dumps(
+            {
+                "domain": "citydata.mesaaz.gov",
+                "dataset_id": "dfcn-ivuc",
+                "limit": 500,
+                "order": ":id DESC",
+                "where": "solicitation='True'",
+                "status_field": "contract_status",
+                "open_statuses": [
+                    "Published",
+                    "Active",
+                    "Initiated",
+                    "Under Review",
+                    "In Evaluation",
+                    "Awarding",
+                    "Rebid Published",
+                    "Rebid Initiated",
+                    "Rebid In Eval",
+                ],
+                "agency": "City of Mesa, AZ",
+                "field_map": {
+                    "title": "contract_description",
+                    "solicitation_number": "contract_no",
+                    "contract_type": "type",
+                    "description": "contract_description",
+                },
+            }
+        ),
+    },
+    {
         "name": "Maricopa County Procurement Services",
         "base_url": "https://www.maricopa.gov/2087/Procurement-Services",
         "portal_type": "Generic Public",
@@ -235,9 +278,18 @@ def seed_real_sources(session: Session) -> dict:
             ).first()
         if existing is not None:
             changed = False
-            for field in ("base_url", "portal_type", "state", "enabled", "notes"):
-                if getattr(existing, field) != entry[field]:
-                    setattr(existing, field, entry[field])
+            for field in (
+                "base_url",
+                "portal_type",
+                "state",
+                "enabled",
+                "notes",
+                "source_type",
+                "config_json",
+            ):
+                desired = entry.get(field, "public_page" if field == "source_type" else None)
+                if getattr(existing, field) != desired:
+                    setattr(existing, field, desired)
                     changed = True
             if changed:
                 session.add(existing)
@@ -249,12 +301,13 @@ def seed_real_sources(session: Session) -> dict:
         session.add(
             SourceConfig(
                 name=entry["name"],
-                source_type="public_page",
+                source_type=entry.get("source_type", "public_page"),
                 base_url=entry["base_url"],
                 portal_type=entry["portal_type"],
                 state=entry["state"],
                 enabled=entry["enabled"],
                 notes=entry["notes"],
+                config_json=entry.get("config_json"),
                 requires_credentials=False,
                 auth_status=AUTH_NOT_REQUIRED,
             )
