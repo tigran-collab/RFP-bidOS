@@ -5,6 +5,7 @@ from urllib.parse import unquote, urlparse
 import typer
 from sqlmodel import Session, select
 
+from app.config import get_settings
 from app.db import engine, init_db
 from app.models import Document, Opportunity, ScrapeRun, SourceConfig
 from app.schemas import OpportunityCreate, OpportunityUpdate
@@ -58,6 +59,53 @@ def utc_now() -> datetime:
 def init_database() -> None:
     init_db()
     typer.echo("Database initialized")
+
+
+@cli.command("backup-db")
+def backup_db_command(
+    output_dir: str = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Directory for the backup. Defaults to <db folder>/backups.",
+    ),
+) -> None:
+    """Write a timestamped, consistent snapshot of the local SQLite database.
+
+    Uses SQLite's online backup API so it is safe to run while the app is
+    running. This protects the irreplaceable triage/scoring/review data, which
+    lives only in the local .db file and is intentionally not in git.
+    """
+    import sqlite3
+
+    settings = get_settings()
+    url = settings.database_url
+    if not url.startswith("sqlite:///"):
+        typer.echo("backup-db only supports local SQLite databases.")
+        raise typer.Exit(code=1)
+
+    db_path = Path(url.replace("sqlite:///", "", 1))
+    if not db_path.exists():
+        typer.echo(f"Database file not found: {db_path}. Run init-db first.")
+        raise typer.Exit(code=1)
+
+    dest_dir = Path(output_dir) if output_dir else db_path.parent / "backups"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = utc_now().strftime("%Y%m%d_%H%M%S")
+    dest_path = dest_dir / f"{db_path.stem}_{stamp}.db"
+
+    source = sqlite3.connect(str(db_path))
+    try:
+        destination = sqlite3.connect(str(dest_path))
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+
+    size_kb = dest_path.stat().st_size / 1024
+    typer.echo(f"Backup written: {dest_path} ({size_kb:.1f} KB)")
 
 
 @cli.command("seed-demo")
