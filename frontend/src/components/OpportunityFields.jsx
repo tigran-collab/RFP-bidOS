@@ -12,6 +12,7 @@ const NEXT_ACTIONS = [
   "Parse Documents",
   "Run AI Evaluation",
   "Extract Requirements",
+  "Review Requirements",
   "Verify Portal",
   "Manual Review",
   "No Action",

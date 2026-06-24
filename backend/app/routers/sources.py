@@ -202,7 +202,7 @@ def _run_scrape_for_source(source: SourceConfig) -> dict:
             source_record.last_scrape_status = status
             source_record.last_scrape_summary = _scrape_summary(result)
             session.add(source_record)
-            session.commit()
+        session.commit()
 
     return result
 

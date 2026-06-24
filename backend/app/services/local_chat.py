@@ -210,6 +210,9 @@ def _chat_error_response(status: dict, summary: dict, category: str, message: st
 
 def _fallback_context(context_request: dict, user_message: str) -> dict | None:
     mode = context_request.get("mode", "auto")
+    if mode == "pursuit":
+        # Pursuit is already the fallback target; do not retry again or we recurse.
+        return None
     if mode in {"app_overview", "auto"} or "opportunit" in user_message.lower():
         return {
             **context_request,

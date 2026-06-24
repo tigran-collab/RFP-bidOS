@@ -82,6 +82,7 @@ NEXT_ACTION_CHOICES = {
     "Parse Documents",
     "Run AI Evaluation",
     "Extract Requirements",
+    "Review Requirements",
     "Verify Portal",
     "Manual Review",
     "No Action",

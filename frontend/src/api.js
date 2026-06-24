@@ -7,7 +7,15 @@ async function request(path, options = {}) {
     let detail = `API request failed: ${response.status}`;
     try {
       const payload = await response.json();
-      detail = payload.error || payload.detail || detail;
+      if (Array.isArray(payload.detail)) {
+        detail = payload.detail
+          .map((item) => item?.msg || (typeof item === "string" ? item : JSON.stringify(item)))
+          .join("; ");
+      } else if (payload.detail && typeof payload.detail === "object") {
+        detail = payload.detail.msg || JSON.stringify(payload.detail);
+      } else {
+        detail = payload.error || payload.detail || detail;
+      }
     } catch {
       detail = `API request failed: ${response.status}`;
     }
