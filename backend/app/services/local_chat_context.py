@@ -164,7 +164,7 @@ def build_deadline_context(
         for opp in opportunities
         if not opp.due_date or opp.deadline_risk == "Missing Deadline"
     ]
-    upcoming.sort(key=lambda opp: opp.due_date or datetime.max)
+    upcoming.sort(key=lambda opp: to_naive_utc(opp.due_date) if opp.due_date else datetime.max)
     missing.sort(key=_action_sort_key)
     upcoming_context = [
         _compact_opportunity(opp, docs_by_opp, reqs_by_opp)
@@ -438,7 +438,7 @@ def _action_sort_key(opportunity: Opportunity) -> tuple:
         -(opportunity.bid_score if opportunity.bid_score is not None else -1e9),
         -(opportunity.ai_score if opportunity.ai_score is not None else -1e9),
         0 if opportunity.due_date else 1,
-        opportunity.due_date or datetime.max,
+        to_naive_utc(opportunity.due_date) if opportunity.due_date else datetime.max,
         opportunity.id or 0,
     )
 
@@ -502,10 +502,20 @@ def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _naive(value: datetime) -> datetime:
+def to_naive_utc(value: datetime) -> datetime:
+    """Return a naive-UTC datetime so it can be compared against naive sentinels.
+
+    Aware values are converted to UTC and stripped of tzinfo; already-naive
+    values pass through unchanged. This prevents TypeError when mixing aware
+    due_date/checked_at/updated_at values with naive datetime.max/min sentinels.
+    """
     if value.tzinfo is None:
         return value
     return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _naive(value: datetime) -> datetime:
+    return to_naive_utc(value)
 
 
 def _truncate(value: str, limit: int) -> str:

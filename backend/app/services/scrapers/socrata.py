@@ -121,7 +121,10 @@ class SocrataAdapter:
             return normalize_space(str(value))
 
         detail_url = mapped("detail_url")
-        source_url = detail_url or portal_url
+        # Use only the per-row detail link as source_url. Falling back to the
+        # shared portal_url would give every row from a detail-less dataset the
+        # same source_url, collapsing them into one record in dedup.
+        source_url = detail_url
         return ScraperResult(
             title=title,
             agency=mapped("agency") or agency_fallback,

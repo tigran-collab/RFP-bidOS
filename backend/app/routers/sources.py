@@ -182,7 +182,29 @@ def _run_scrape_for_source(source: SourceConfig) -> dict:
         session.commit()
         session.refresh(run)
 
-    result = scrape_source(source)
+    try:
+        result = scrape_source(source)
+    except Exception as exc:
+        # Without this, a raising scraper leaves the ScrapeRun stuck in
+        # "running" forever and the API path 500s with no record of failure.
+        finished = utc_now()
+        message = str(exc)
+        with Session(engine) as session:
+            scrape_run = session.get(ScrapeRun, run.id)
+            if scrape_run is not None:
+                scrape_run.finished_at = finished
+                scrape_run.status = "failed"
+                scrape_run.error_message = message
+                session.add(scrape_run)
+            source_record = session.get(SourceConfig, source.id)
+            if source_record is not None:
+                source_record.last_scrape_at = finished
+                source_record.last_scrape_status = "failed"
+                source_record.last_scrape_summary = f"Scrape failed: {message}"
+                session.add(source_record)
+            session.commit()
+        raise HTTPException(status_code=502, detail=f"Scrape failed: {message}")
+
     status = "failed" if result["errors"] else "completed"
 
     with Session(engine) as session:

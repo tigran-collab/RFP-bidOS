@@ -296,8 +296,11 @@ REAL_PUBLIC_SOURCES: list[dict] = [
 def seed_real_sources(session: Session) -> dict:
     """
     Idempotently insert curated public sources. Matches by base_url, then name.
-    Rows matched by name are refreshed with the curated URL, portal type,
-    state, enabled flag, and notes, so URL corrections propagate on reseed.
+    Existing rows are refreshed with the curated URL, portal type, state,
+    source type, and config JSON so corrections propagate on reseed. The
+    operator-managed "enabled" flag and "notes" are intentionally left
+    untouched on existing rows; only newly created rows get them from the
+    curated entry.
     """
     created = 0
     updated = 0
@@ -312,12 +315,12 @@ def seed_real_sources(session: Session) -> dict:
             ).first()
         if existing is not None:
             changed = False
+            # Deliberately exclude "enabled" and "notes": operators toggle and
+            # annotate sources, and reseeding must not revert those changes.
             for field in (
                 "base_url",
                 "portal_type",
                 "state",
-                "enabled",
-                "notes",
                 "source_type",
                 "config_json",
             ):

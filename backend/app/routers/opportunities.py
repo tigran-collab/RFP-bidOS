@@ -6,7 +6,14 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, select
 
 from app.db import engine
-from app.models import Document, Opportunity, OpportunityEvaluation, Requirement, SourceConfig
+from app.models import (
+    BidLogisticsQA,
+    Document,
+    Opportunity,
+    OpportunityEvaluation,
+    Requirement,
+    SourceConfig,
+)
 from app.schemas import (
     DocumentRead,
     OpportunityCreate,
@@ -327,6 +334,14 @@ def delete_opportunity(opportunity_id: int) -> dict[str, str]:
         opportunity = session.get(Opportunity, opportunity_id)
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
+        # No DB-level cascade is configured, so remove child rows first to
+        # avoid leaving Documents/Requirements/Evaluations/QA orphaned.
+        for child_model in (Document, Requirement, OpportunityEvaluation, BidLogisticsQA):
+            children = session.exec(
+                select(child_model).where(child_model.opportunity_id == opportunity_id)
+            ).all()
+            for child in children:
+                session.delete(child)
         session.delete(opportunity)
         session.commit()
         return {"status": "deleted"}

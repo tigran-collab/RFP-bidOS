@@ -16,6 +16,7 @@ from app.models import (
     Requirement,
     SourceConfig,
 )
+from app.services.local_chat_context import to_naive_utc
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 
 UPCOMING_WINDOW_DAYS = 30
@@ -38,10 +39,11 @@ def _utc_now() -> datetime:
 
 
 def _days_until(due: datetime, now: datetime) -> float:
-    value = due
-    if value.tzinfo is not None:
-        value = value.astimezone(UTC).replace(tzinfo=None)
-    return (value - now).total_seconds() / 86400.0
+    return (to_naive_utc(due) - now).total_seconds() / 86400.0
+
+
+def _checked_at_key(qa: "BidLogisticsQA") -> datetime:
+    return to_naive_utc(qa.checked_at) if qa.checked_at else datetime.min
 
 
 def get_operations_dashboard(session) -> dict:
@@ -57,7 +59,7 @@ def get_operations_dashboard(session) -> dict:
     latest_qa: dict[int, BidLogisticsQA] = {}
     for qa in qa_records:
         current = latest_qa.get(qa.opportunity_id)
-        if current is None or (qa.checked_at or datetime.min) > (current.checked_at or datetime.min):
+        if current is None or _checked_at_key(qa) > _checked_at_key(current):
             latest_qa[qa.opportunity_id] = qa
 
     # --- per-opportunity document rollups ---
@@ -147,7 +149,7 @@ def _upcoming_deadlines(opportunities: list[Opportunity], now: datetime) -> list
         days = _days_until(opp.due_date, now)
         if 0 <= days <= UPCOMING_WINDOW_DAYS:
             items.append(opp)
-    items.sort(key=lambda o: o.due_date)
+    items.sort(key=lambda o: to_naive_utc(o.due_date))
     return [_opp_brief(o) for o in items]
 
 
@@ -167,7 +169,7 @@ def _top_opportunities(opportunities: list[Opportunity], limit: int = 10) -> lis
             -(o.bid_score if o.bid_score is not None else -1e9),
             -(o.ai_score if o.ai_score is not None else -1e9),
             0 if o.due_date else 1,
-            o.due_date or datetime.max,
+            to_naive_utc(o.due_date) if o.due_date else datetime.max,
         )
 
     candidates.sort(key=sort_key)
@@ -291,11 +293,11 @@ def _source_health(sources: list[SourceConfig]) -> list[dict]:
 
 
 def _recent_activity(opportunities: list[Opportunity], limit: int = 10) -> list[dict]:
-    ordered = sorted(
-        opportunities,
-        key=lambda o: o.updated_at or o.created_at or datetime.min,
-        reverse=True,
-    )
+    def _activity_key(o: Opportunity) -> datetime:
+        value = o.updated_at or o.created_at
+        return to_naive_utc(value) if value else datetime.min
+
+    ordered = sorted(opportunities, key=_activity_key, reverse=True)
     activity = []
     for opp in ordered[:limit]:
         activity.append(

@@ -163,6 +163,51 @@ def test_location_human_address_json_is_flattened(monkeypatch):
     assert results[0].location == "100 Main St, Los Angeles, CA, 90012"
 
 
+def test_no_detail_url_yields_none_source_url_and_no_collapse(monkeypatch):
+    # Mesa-style config has no detail_url in its field_map. Each row must get
+    # source_url=None (so the portal_url is not reused as a shared key) and the
+    # two distinct solicitation numbers must produce two distinct results.
+    adapter = SocrataAdapter()
+    rows = [
+        {
+            "contract_no": "2026170",
+            "contract_description": "Unarmed Security Guard Services",
+            "type": "RFP",
+            "contract_status": "Published",
+        },
+        {
+            "contract_no": "2026171",
+            "contract_description": "Armed Security Guard Services",
+            "type": "RFP",
+            "contract_status": "Published",
+        },
+    ]
+    monkeypatch.setattr(adapter, "_fetch_rows", lambda *a, **k: rows)
+
+    results = adapter.scrape(make_source())
+
+    assert len(results) == 2
+    assert {r.solicitation_number for r in results} == {"2026170", "2026171"}
+    for result in results:
+        assert result.source_url is None
+        assert result.detail_url is None
+        assert result.portal_url == "https://citydata.mesaaz.gov/d/dfcn-ivuc"
+
+
+def test_row_to_result_source_url_none_without_detail_url():
+    adapter = SocrataAdapter()
+    field_map = {"title": "contract_description", "solicitation_number": "contract_no"}
+    row = {"contract_description": "Security Guard Services", "contract_no": "X-1"}
+
+    result = adapter._row_to_result(
+        row, field_map, "City of Mesa, AZ", "https://citydata.mesaaz.gov/d/dfcn-ivuc", "citydata.mesaaz.gov"
+    )
+
+    assert result is not None
+    assert result.source_url is None
+    assert result.detail_url is None
+
+
 def test_missing_required_config_raises(monkeypatch):
     adapter = SocrataAdapter()
     bad = SimpleNamespace(source_type="socrata", name="x", config_json=json.dumps({"domain": "d"}))
