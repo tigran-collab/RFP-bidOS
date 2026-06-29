@@ -48,9 +48,10 @@ REAL_PUBLIC_SOURCES: list[dict] = [
                 "order": "bidpost DESC",
                 "status_field": "stagename",
                 "open_statuses": ["Open"],
-                "agency": "City of Los Angeles (RAMP)",
+                "agency_fallback": "City of Los Angeles (RAMP)",
                 "field_map": {
                     "title": "title",
+                    "agency": "department",
                     "solicitation_number": "rampid",
                     "contract_type": "type",
                     "service_type": "category",

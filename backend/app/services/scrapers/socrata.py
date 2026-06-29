@@ -64,7 +64,11 @@ class SocrataAdapter:
         rows = self._fetch_rows(domain, dataset_id, config)
         status_field = config.get("status_field")
         open_statuses = {s.lower() for s in config.get("open_statuses") or []}
-        agency = config.get("agency") or getattr(source_config, "name", None)
+        agency_fallback = (
+            config.get("agency_fallback")
+            or config.get("agency")
+            or getattr(source_config, "name", None)
+        )
         portal_url = f"https://{domain}/d/{dataset_id}"
 
         results: list[ScraperResult] = []
@@ -73,7 +77,9 @@ class SocrataAdapter:
                 status_value = str(row.get(status_field, "")).strip().lower()
                 if status_value and status_value not in open_statuses:
                     continue
-            result = self._row_to_result(row, field_map, agency, portal_url, domain)
+            result = self._row_to_result(
+                row, field_map, agency_fallback, portal_url, domain
+            )
             if result is not None:
                 results.append(result)
         return results
@@ -97,11 +103,11 @@ class SocrataAdapter:
         self,
         row: dict,
         field_map: dict,
-        agency: str | None,
+        agency_fallback: str | None,
         portal_url: str,
         domain: str,
     ) -> ScraperResult | None:
-        title = normalize_space(str(row.get(field_map["title"], "") or ""))
+        title = normalize_space(str(_coerce_cell(row.get(field_map["title"])) or ""))
         if not title:
             return None
 
@@ -118,7 +124,7 @@ class SocrataAdapter:
         source_url = detail_url or portal_url
         return ScraperResult(
             title=title,
-            agency=agency,
+            agency=mapped("agency") or agency_fallback,
             solicitation_number=mapped("solicitation_number"),
             source_url=source_url,
             detail_url=detail_url,
@@ -140,8 +146,32 @@ def _coerce_cell(value):
     {"human_address": "...", ...}. Everything else passes through.
     """
     if isinstance(value, dict):
-        return value.get("url") or value.get("human_address") or ""
+        if value.get("url"):
+            return value["url"]
+        if value.get("human_address"):
+            return _coerce_human_address(value["human_address"])
+        return ""
     return value
+
+
+def _coerce_human_address(value):
+    if isinstance(value, dict):
+        parts = [
+            value.get("address"),
+            value.get("city"),
+            value.get("state"),
+            value.get("zip"),
+        ]
+        return ", ".join(str(part) for part in parts if part)
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return value
+    if not isinstance(parsed, dict):
+        return value
+    return _coerce_human_address(parsed)
 
 
 def _load_config(source_config) -> dict:

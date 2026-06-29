@@ -109,6 +109,60 @@ def test_url_dict_cell_is_extracted(monkeypatch):
     assert results[0].source_url == "https://www.rampla.org/s/opportunity-details?id=abc"
 
 
+def test_row_agency_overrides_fallback(monkeypatch):
+    adapter = SocrataAdapter()
+    config = {
+        "domain": "data.lacity.org",
+        "dataset_id": "hf3r-utnq",
+        "agency_fallback": "City of Los Angeles (RAMP)",
+        "field_map": {
+            "title": "title",
+            "agency": "department",
+        },
+    }
+    row = {
+        "title": "Security Officer Services",
+        "department": "Los Angeles World Airports",
+    }
+    monkeypatch.setattr(adapter, "_fetch_rows", lambda *a, **k: [row])
+
+    results = adapter.scrape(make_source(config))
+
+    assert len(results) == 1
+    assert results[0].agency == "Los Angeles World Airports"
+
+
+def test_location_human_address_json_is_flattened(monkeypatch):
+    adapter = SocrataAdapter()
+    config = {
+        "domain": "example.data.gov",
+        "dataset_id": "abcd-1234",
+        "field_map": {
+            "title": "title",
+            "location": "location",
+        },
+    }
+    row = {
+        "title": "Mobile Patrol Services",
+        "location": {
+            "human_address": json.dumps(
+                {
+                    "address": "100 Main St",
+                    "city": "Los Angeles",
+                    "state": "CA",
+                    "zip": "90012",
+                }
+            )
+        },
+    }
+    monkeypatch.setattr(adapter, "_fetch_rows", lambda *a, **k: [row])
+
+    results = adapter.scrape(make_source(config))
+
+    assert len(results) == 1
+    assert results[0].location == "100 Main St, Los Angeles, CA, 90012"
+
+
 def test_missing_required_config_raises(monkeypatch):
     adapter = SocrataAdapter()
     bad = SimpleNamespace(source_type="socrata", name="x", config_json=json.dumps({"domain": "d"}))
