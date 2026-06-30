@@ -260,6 +260,12 @@ def discover_socrata_sources_command(
         help="Comma-separated catalog query terms (overrides the defaults).",
     ),
     limit: int = typer.Option(20, "--limit", help="Max datasets per query term."),
+    states: str = typer.Option(
+        None,
+        "--states",
+        help="Comma-separated state codes to keep (e.g. CA,TX,NV,AZ). "
+        "Filters out other geographies before probing.",
+    ),
     no_probe: bool = typer.Option(
         False, "--no-probe", help="Skip per-dataset column probing."
     ),
@@ -281,8 +287,15 @@ def discover_socrata_sources_command(
     if query:
         queries = [part.strip() for part in query.split(",") if part.strip()]
 
+    state_codes = None
+    if states:
+        state_codes = [part.strip() for part in states.split(",") if part.strip()]
+
     candidates = discover_socrata_sources(
-        queries=queries, limit_per_query=limit, probe=not no_probe
+        queries=queries,
+        limit_per_query=limit,
+        probe=not no_probe,
+        states=state_codes,
     )
     procurement = [c for c in candidates if c.get("is_procurement")]
     others = [c for c in candidates if not c.get("is_procurement")]
@@ -296,9 +309,14 @@ def discover_socrata_sources_command(
         if not procurement:
             typer.echo("  (none)")
         for candidate in procurement:
+            state_tag = (
+                f"{'/'.join(candidate.get('states') or [])} | "
+                if candidate.get("states")
+                else ""
+            )
             typer.echo(
                 f"  [{candidate['domain']}] {candidate['dataset_id']} | "
-                f"{candidate['name'][:60]}"
+                f"{state_tag}{candidate['name'][:60]}"
             )
             typer.echo(
                 f"      field_map: {_json.dumps(candidate.get('suggested_field_map') or {})}"

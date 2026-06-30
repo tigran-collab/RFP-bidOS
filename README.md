@@ -339,11 +339,13 @@ Many governments publish procurement data to Socrata open-data portals. The `dis
 cd backend
 python -m app.cli discover-socrata-sources
 python -m app.cli discover-socrata-sources --query "bids,solicitations" --limit 30
+python -m app.cli discover-socrata-sources --states CA,TX,NV,AZ
 python -m app.cli discover-socrata-sources --no-probe
 python -m app.cli discover-socrata-sources --seed
 ```
 
-- Without `--seed`, it prints a table of candidates, clearly separating procurement-shaped datasets from other government datasets, with each candidate's suggested field map.
+- Without `--seed`, it prints a table of candidates, clearly separating procurement-shaped datasets from other government datasets, with each candidate's inferred state and suggested field map.
+- `--states CA,TX,NV,AZ` keeps only datasets whose domain maps to one of the given states (inferred by domain substring), and applies the filter **before** probing so out-of-state datasets are never fetched. Award/tabulation/historical and charitable-solicitation datasets are never classified as procurement.
 - With `--seed`, each procurement candidate that is not already configured is inserted as a **DISABLED** `socrata` SourceConfig. Seeding is idempotent (it echoes created vs. skipped counts) and never enables a source automatically.
 - Auto-discovered field maps are **best-guess only** and must be verified by a human before enabling and scraping. The seeded source's notes call this out.
 - The catalog query and per-dataset probe are the only network calls, both via the public Socrata API (no key).

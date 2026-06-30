@@ -13,9 +13,41 @@ from app.models import SourceConfig
 from app.services.scrapers.socrata_discovery import (
     _is_procurement,
     discover_socrata_sources,
+    infer_states,
     seed_discovered_sources,
     suggest_field_map,
 )
+
+
+def test_infer_states_maps_domains():
+    assert infer_states("data.lacity.org") == ["CA"]
+    assert infer_states("citydata.mesaaz.gov") == ["AZ"]
+    assert infer_states("data.texas.gov") == ["TX"]
+    assert infer_states("data.delaware.gov") == []  # out of target geography
+
+
+def test_states_filter_keeps_only_requested_geography():
+    catalog = {
+        "results": [
+            {
+                "resource": {"id": "aaaa-1111", "name": "Open Bids", "description": ""},
+                "metadata": {"domain": "citydata.mesaaz.gov"},
+            },
+            {
+                "resource": {"id": "bbbb-2222", "name": "Open Bids", "description": ""},
+                "metadata": {"domain": "data.delaware.gov"},
+            },
+        ]
+    }
+
+    def fake_get(url, params=None, timeout=None):
+        return FakeResponse(catalog)
+
+    candidates = discover_socrata_sources(
+        queries=["bids"], probe=False, states=["AZ"], http_get=fake_get
+    )
+    domains = {c["domain"] for c in candidates}
+    assert domains == {"citydata.mesaaz.gov"}  # Delaware filtered out
 
 
 def test_award_tabulation_and_charity_names_excluded_despite_procurement_columns():

@@ -74,6 +74,65 @@ EXCLUDE_NAME_HINTS = (
 )
 
 
+# Domain substrings that map a Socrata domain to a US state, for the optional
+# geo filter. Broad but adequate for noise reduction; a domain matching none of
+# the requested states is dropped when a state filter is supplied. Editable.
+STATE_DOMAIN_HINTS = {
+    "CA": (
+        "ca.gov",
+        "californ",
+        "lacity",
+        "lacounty",
+        "sandiego",
+        "sfgov",
+        "sccgov",
+        "sanjose",
+        "fresno",
+        "oakland",
+        "longbeach",
+        "sacramento",
+        "metro.net",
+    ),
+    "TX": (
+        "texas",
+        "tx.gov",
+        "dallas",
+        "houston",
+        "austin",
+        "sanantonio",
+        "fortworth",
+    ),
+    "NV": (
+        "nevada",
+        "nv.gov",
+        "lasvegas",
+        "vegas",
+        "washoe",
+        "reno",
+        "clarkcounty",
+    ),
+    "AZ": (
+        "arizona",
+        "az.gov",
+        "mesaaz",
+        "phoenix",
+        "tucson",
+        "maricopa",
+        "pima",
+    ),
+}
+
+
+def infer_states(domain: str) -> list[str]:
+    """Best-guess the US state(s) a Socrata domain belongs to, by substring."""
+    lowered = (domain or "").lower()
+    return [
+        state
+        for state, hints in STATE_DOMAIN_HINTS.items()
+        if any(hint in lowered for hint in hints)
+    ]
+
+
 def _is_gov_domain(domain: str) -> bool:
     if not domain:
         return False
@@ -162,15 +221,20 @@ def discover_socrata_sources(
     queries=None,
     limit_per_query: int = 20,
     probe: bool = True,
+    states=None,
     http_get=requests.get,
 ) -> list[dict]:
     """Discover candidate procurement datasets from the Socrata catalog.
 
     Returns a list of candidate dicts. Each candidate is de-duped by
-    (domain, dataset_id). Probing is best-effort per candidate: a failed probe
-    records ``probe_error`` rather than aborting the whole run.
+    (domain, dataset_id) and tagged with inferred ``states``. When ``states`` is
+    given (an iterable of 2-letter codes), only candidates whose inferred state
+    intersects the requested set are kept — and the filter is applied before
+    probing, so out-of-state datasets are never fetched. Probing is best-effort
+    per candidate: a failed probe records ``probe_error`` rather than aborting.
     """
     queries = list(queries) if queries else list(DEFAULT_QUERIES)
+    state_filter = {str(s).strip().upper() for s in states} if states else None
     candidates: list[dict] = []
     seen: set[tuple[str, str]] = set()
 
@@ -199,6 +263,9 @@ def discover_socrata_sources(
                 continue
             if not _is_gov_domain(domain):
                 continue
+            inferred_states = infer_states(domain)
+            if state_filter is not None and not (set(inferred_states) & state_filter):
+                continue
             key = (domain, dataset_id)
             if key in seen:
                 continue
@@ -210,6 +277,7 @@ def discover_socrata_sources(
                     "name": resource.get("name") or "",
                     "description": resource.get("description") or "",
                     "query": term,
+                    "states": inferred_states,
                     "is_procurement": False,
                     "columns": [],
                     "suggested_field_map": {},
