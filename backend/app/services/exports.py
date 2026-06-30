@@ -17,6 +17,7 @@ from app.models import (
     Opportunity,
     Requirement,
 )
+from app.services.local_chat_context import to_naive_utc
 
 ICS_PRODID = "-//RFP BidOS//Deadlines//EN"
 ICS_EXCLUDED_STATUSES = {"Archived", "Do Not Pursue"}
@@ -96,6 +97,22 @@ LOGISTICS_QA_COLUMNS = [
 ]
 
 
+# Leading characters a spreadsheet may interpret as the start of a formula.
+_CSV_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _defuse_csv_value(value):
+    """Prefix a single quote to a string that could be read as a formula.
+
+    Spreadsheet apps treat a cell beginning with =, +, -, @, tab, or CR as a
+    formula; an exported title like ``=HYPERLINK("x")`` would then execute.
+    Prefixing ``'`` forces the cell to be treated as literal text.
+    """
+    if isinstance(value, str) and value and value[0] in _CSV_INJECTION_PREFIXES:
+        return "'" + value
+    return value
+
+
 def _value(obj, name):
     value = getattr(obj, name, None)
     if value is None:
@@ -112,7 +129,7 @@ def _write_csv(columns: list[str], rows: list[dict]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row)
+        writer.writerow({key: _defuse_csv_value(val) for key, val in row.items()})
     return buffer.getvalue()
 
 
@@ -236,14 +253,41 @@ def _ics_escape(value) -> str:
 
 def _ics_date(value: datetime) -> str:
     """Format the date portion of a datetime as an all-day VALUE=DATE string."""
-    return value.strftime("%Y%m%d")
+    return to_naive_utc(value).strftime("%Y%m%d")
 
 
 def _ics_timestamp(value: datetime | None) -> str:
     """Format a UTC DTSTAMP value (YYYYMMDDTHHMMSSZ)."""
     if value is None:
         value = datetime.now(UTC).replace(tzinfo=None)
-    return value.strftime("%Y%m%dT%H%M%SZ")
+    return to_naive_utc(value).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _fold_line(line: str) -> str:
+    """Fold a content line per RFC 5545: no line exceeds 75 octets.
+
+    Continuation lines are joined with CRLF + a single leading space. Folding
+    respects UTF-8 octet counts but only breaks on character boundaries, so a
+    multi-byte character is never split across a fold.
+    """
+    if len(line.encode("utf-8")) <= 75:
+        return line
+    pieces: list[str] = []
+    current = ""
+    # The first line may use 75 octets; continuation lines reserve one octet
+    # for the leading space, so they cap at 74.
+    budget = 75
+    for char in line:
+        char_octets = len(char.encode("utf-8"))
+        if len(current.encode("utf-8")) + char_octets > budget:
+            pieces.append(current)
+            current = char
+            budget = 74
+        else:
+            current += char
+    if current:
+        pieces.append(current)
+    return "\r\n ".join(pieces)
 
 
 def _ics_event(opp: Opportunity, kind: str, date_value: datetime, summary: str, dtstamp: str) -> list[str]:
@@ -258,19 +302,19 @@ def _ics_event(opp: Opportunity, kind: str, date_value: datetime, summary: str, 
 
     lines = [
         "BEGIN:VEVENT",
-        f"UID:{opp.id}-{kind}@rfp-bidos",
-        f"DTSTAMP:{dtstamp}",
-        f"DTSTART;VALUE=DATE:{_ics_date(date_value)}",
-        f"SUMMARY:{_ics_escape(summary)}",
+        _fold_line(f"UID:{opp.id}-{kind}@rfp-bidos"),
+        _fold_line(f"DTSTAMP:{dtstamp}"),
+        _fold_line(f"DTSTART;VALUE=DATE:{_ics_date(date_value)}"),
+        _fold_line(f"SUMMARY:{_ics_escape(summary)}"),
     ]
     if description:
-        lines.append(f"DESCRIPTION:{_ics_escape(description)}")
+        lines.append(_fold_line(f"DESCRIPTION:{_ics_escape(description)}"))
     lines.extend(
         [
             "BEGIN:VALARM",
             "ACTION:DISPLAY",
             "TRIGGER:-P2D",
-            f"DESCRIPTION:{_ics_escape('Reminder: ' + summary)}",
+            _fold_line(f"DESCRIPTION:{_ics_escape('Reminder: ' + summary)}"),
             "END:VALARM",
             "END:VEVENT",
         ]

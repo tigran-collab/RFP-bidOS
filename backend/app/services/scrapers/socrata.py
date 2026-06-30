@@ -102,7 +102,10 @@ class SocrataAdapter:
 
         base_params = {}
         # Stable ordering is required for offset paging not to skip/repeat rows.
-        base_params["$order"] = config.get("order") or ":id"
+        # Append :id as a tiebreaker so a non-unique configured order (e.g.
+        # "due_date DESC") can't reorder ties across $offset pages and drop/dup
+        # rows. :id is the dataset's unique row identifier.
+        base_params["$order"] = _order_with_id_tiebreaker(config.get("order"))
         if config.get("where"):
             base_params["$where"] = config["where"]
         headers = {"User-Agent": SOCRATA_USER_AGENT, "Accept": "application/json"}
@@ -204,6 +207,18 @@ class SocrataAdapter:
             raw_text=title,
             confidence_score=0.6,
         )
+
+
+def _order_with_id_tiebreaker(order: str | None) -> str:
+    """Return an $order clause guaranteed to end with the unique :id tiebreaker."""
+    order = (order or "").strip()
+    if not order:
+        return ":id"
+    # Don't double-append if the configured order already ends with :id.
+    last_term = order.split(",")[-1].strip().lower()
+    if last_term == ":id" or last_term.startswith(":id "):
+        return order
+    return f"{order}, :id"
 
 
 def _coerce_cell(value):

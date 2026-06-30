@@ -121,6 +121,8 @@ def build_logistics_qa_summary(opportunity, requirements=None, documents=None) -
         )
 
     # --- parsed documents present? ---
+    # "Parsed (No Text)" is an empty/scanned PDF: it has no usable text, so it
+    # does not count as a parsed document for logistics purposes.
     has_parsed = any(getattr(d, "parsed_status", None) == "Parsed" for d in documents)
     if active and not has_parsed:
         add(

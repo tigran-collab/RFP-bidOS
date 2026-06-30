@@ -315,3 +315,43 @@ def test_fetch_rows_defaults_order_to_id_for_stable_paging(monkeypatch):
     adapter._fetch_rows("data.example.gov", "abcd-1234", {"limit": 5, **FAST_CONFIG})
 
     assert captured["$order"] == ":id"
+
+
+def test_fetch_rows_appends_id_tiebreaker_to_non_unique_order(monkeypatch):
+    # A non-unique configured order must get :id appended as a tiebreaker so
+    # offset paging cannot skip/dup rows across pages.
+    adapter = SocrataAdapter()
+    captured = {}
+
+    def capture_page(url, params, headers):
+        captured.update(params)
+        return []
+
+    monkeypatch.setattr(adapter, "_fetch_page", capture_page)
+    adapter._fetch_rows(
+        "data.example.gov",
+        "abcd-1234",
+        {"limit": 5, "order": "due_date DESC", **FAST_CONFIG},
+    )
+
+    assert captured["$order"] == "due_date DESC, :id"
+    # :id is the last ordering term.
+    assert captured["$order"].split(",")[-1].strip() == ":id"
+
+
+def test_fetch_rows_does_not_double_append_id(monkeypatch):
+    adapter = SocrataAdapter()
+    captured = {}
+
+    def capture_page(url, params, headers):
+        captured.update(params)
+        return []
+
+    monkeypatch.setattr(adapter, "_fetch_page", capture_page)
+    adapter._fetch_rows(
+        "data.example.gov",
+        "abcd-1234",
+        {"limit": 5, "order": "due_date DESC, :id", **FAST_CONFIG},
+    )
+
+    assert captured["$order"] == "due_date DESC, :id"

@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +10,29 @@ from app.models import Document
 PROCESSED_ROOT = Path("data/processed")
 PDF_TYPES = {"pdf", ".pdf", "application/pdf"}
 TXT_TYPES = {"txt", ".txt", "text/plain"}
+
+# Minimum count of real (non-header, non-whitespace) characters for a parse to
+# count as having usable text. Below this we treat the PDF as empty/scanned.
+MIN_REAL_TEXT_CHARS = 20
+
+# Matches the per-page header the parser inserts (e.g. "--- Page 1 ---").
+_PAGE_HEADER_RE = re.compile(r"^---\s*Page\s+\d+\s*---\s*$", re.MULTILINE)
+
+
+def _parsed_status_for_output(output_path: Path) -> str:
+    """Return "Parsed" or "Parsed (No Text)" by inspecting the extracted text.
+
+    Strips the "--- Page N ---" headers the parser inserts and checks how much
+    real text remains. Empty/scanned PDFs (image-only) yield only the headers.
+    """
+    try:
+        text = output_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "Parsed"
+    real_text = _PAGE_HEADER_RE.sub("", text)
+    if len(real_text.strip()) < MIN_REAL_TEXT_CHARS:
+        return "Parsed (No Text)"
+    return "Parsed"
 
 
 def parse_pdf_to_text(document_id: int, session) -> dict:
@@ -39,7 +63,8 @@ def parse_pdf_to_text(document_id: int, session) -> dict:
                 parsed_status="Parse Failed",
             )
 
-    document.parsed_status = "Parsed"
+    parsed_status = _parsed_status_for_output(output_path)
+    document.parsed_status = parsed_status
     document.extracted_text_path = str(output_path)
     document.page_count = page_count
     document.parsed_at = _utc_now()
@@ -54,7 +79,7 @@ def parse_pdf_to_text(document_id: int, session) -> dict:
         extracted_text_path=str(output_path),
         page_count=page_count,
         parser_used=parser_used,
-        parsed_status="Parsed",
+        parsed_status=parsed_status,
     )
 
 
@@ -120,7 +145,8 @@ def _parse_txt_to_text(document: Document, session) -> dict:
         text = Path(document.path).read_text(encoding="utf-8", errors="replace")
         output_path.write_text("--- Page 1 ---\n" + text + "\n", encoding="utf-8")
 
-        document.parsed_status = "Parsed"
+        parsed_status = _parsed_status_for_output(output_path)
+        document.parsed_status = parsed_status
         document.extracted_text_path = str(output_path)
         document.page_count = 1
         document.parsed_at = _utc_now()
@@ -135,7 +161,7 @@ def _parse_txt_to_text(document: Document, session) -> dict:
             extracted_text_path=str(output_path),
             page_count=1,
             parser_used="text",
-            parsed_status="Parsed",
+            parsed_status=parsed_status,
         )
     except Exception as exc:
         document.parsed_status = "Parse Failed"

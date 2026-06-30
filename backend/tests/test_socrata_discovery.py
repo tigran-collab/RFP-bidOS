@@ -222,3 +222,56 @@ def test_seeding_creates_disabled_source_and_is_idempotent(session):
         ).all()
     )
     assert len(rows) == 1
+
+
+# --- Fix 6: required title + status_field placement -------------------------
+def test_candidate_without_title_is_not_seeded(session):
+    # A procurement-shaped candidate whose field_map has no "title" key would
+    # raise ValueError if enabled, so it must be skipped, not seeded.
+    candidate = {
+        "domain": "citydata.mesaaz.gov",
+        "dataset_id": "no-title",
+        "name": "Statusy Bids",
+        "is_procurement": True,
+        "suggested_field_map": {"status_field": "status", "due_date": "due_date"},
+    }
+
+    result = seed_discovered_sources(session, [candidate])
+
+    assert result == {"created": 0, "skipped": 1}
+    rows = list(
+        session.exec(
+            select(SourceConfig).where(SourceConfig.source_type == "socrata")
+        ).all()
+    )
+    assert rows == []
+
+
+def test_seeded_config_has_status_field_at_top_level_not_in_field_map(session):
+    candidate = {
+        "domain": "citydata.mesaaz.gov",
+        "dataset_id": "proc-9999",
+        "name": "Open Bids",
+        "is_procurement": True,
+        "suggested_field_map": {
+            "title": "contract_description",
+            "due_date": "due_date",
+            "status_field": "contract_status",
+        },
+    }
+
+    result = seed_discovered_sources(session, [candidate])
+    assert result == {"created": 1, "skipped": 0}
+
+    seeded = session.exec(
+        select(SourceConfig).where(SourceConfig.source_type == "socrata")
+    ).one()
+    config = json.loads(seeded.config_json)
+
+    # status_field lives at the config top level (where socrata.py reads it).
+    assert config["status_field"] == "contract_status"
+    # ...and is no longer inside field_map.
+    assert "status_field" not in config["field_map"]
+    # Other mappings remain in field_map.
+    assert config["field_map"]["title"] == "contract_description"
+    assert config["field_map"]["due_date"] == "due_date"

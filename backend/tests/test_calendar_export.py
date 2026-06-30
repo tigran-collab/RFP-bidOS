@@ -3,10 +3,10 @@
 Offline: uses the in-memory `session` fixture.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.models import Opportunity
-from app.services.exports import export_deadlines_ics
+from app.services.exports import _ics_date, _ics_timestamp, export_deadlines_ics
 
 
 def _seed(session):
@@ -70,3 +70,40 @@ def test_ics_single_opportunity_filter(session):
     content = export_deadlines_ics(session, opportunity_id=opps["archived"].id)
     assert content.count("BEGIN:VEVENT") == 1
     assert f"UID:{opps['archived'].id}-due@rfp-bidos" in content
+
+
+# --- Fix 4: RFC 5545 line folding ------------------------------------------
+def test_ics_long_title_is_folded(session):
+    long_title = "Security Guard Services " + "X" * 200
+    opp = Opportunity(
+        title=long_title,
+        review_status="Pursue",
+        due_date=datetime(2026, 7, 15),
+    )
+    session.add(opp)
+    session.commit()
+
+    content = export_deadlines_ics(session)
+    lines = content.split("\r\n")
+
+    # No content line exceeds 75 octets.
+    for line in lines:
+        assert len(line.encode("utf-8")) <= 75, line
+    # Folding produced at least one continuation line (begins with a space).
+    assert any(line.startswith(" ") for line in lines)
+
+
+# --- Fix 4: tz-aware datetimes normalized to UTC before formatting ----------
+def test_ics_date_normalizes_tz_aware_to_utc_day():
+    # 2026-07-16 00:30 in UTC+2 is still 2026-07-15 in UTC; the DATE value must
+    # be the UTC calendar day, not the local one.
+    aware = datetime(2026, 7, 16, 0, 30, tzinfo=timezone(timedelta(hours=2)))
+    assert _ics_date(aware) == "20260715"
+    # Naive values pass through unchanged.
+    assert _ics_date(datetime(2026, 7, 15)) == "20260715"
+
+
+def test_ics_timestamp_normalizes_tz_aware_to_utc():
+    aware = datetime(2026, 7, 16, 0, 30, tzinfo=timezone(timedelta(hours=2)))
+    # 00:30 +02:00 -> 22:30 UTC on 2026-07-15, with a Z suffix.
+    assert _ics_timestamp(aware) == "20260715T223000Z"

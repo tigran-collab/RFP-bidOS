@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urldefrag, urljoin, urlparse
 
@@ -372,12 +372,9 @@ def _date_after_keywords(text: str, keywords: tuple[str, ...]) -> datetime | Non
             parsed = parse_date(match.group(1))
             if parsed:
                 return parsed
-    for pattern in DATE_PATTERNS:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            parsed = parse_date(match.group(0))
-            if parsed:
-                return parsed
+    # No global fallback: returning the first unrelated date anywhere in the
+    # text fabricates due/pre-bid/Q&A dates from dates that have nothing to do
+    # with the deadline. If no keyword-anchored date is found, return None.
     return None
 
 
@@ -399,10 +396,24 @@ def parse_date(value: str | None) -> datetime | None:
     )
     for fmt in formats:
         try:
-            return datetime.strptime(cleaned, fmt)
+            parsed = datetime.strptime(cleaned, fmt)
         except ValueError:
             continue
+        if not _is_plausible_bid_year(parsed.year):
+            return None
+        return parsed
     return None
+
+
+def _is_plausible_bid_year(year: int) -> bool:
+    """Reject dates outside a sane bid window.
+
+    A bid solicitation's relevant dates fall near the present. Years before
+    last year or more than ~5 years out are implausible (and also defuse a
+    2-digit %y year mapping to 19xx, e.g. "01/15/70" -> 1970).
+    """
+    today = datetime.now(UTC).replace(tzinfo=None)
+    return (today.year - 1) <= year <= (today.year + 5)
 
 
 def _combined_date_pattern() -> str:

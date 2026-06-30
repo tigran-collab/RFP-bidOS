@@ -350,19 +350,30 @@ def seed_discovered_sources(session: Session, candidates: list[dict]) -> dict:
         if key in existing:
             skipped += 1
             continue
+        field_map = dict(candidate.get("suggested_field_map") or {})
+        # A Socrata source requires field_map.title; without it the source
+        # would raise ValueError the moment it is enabled, so skip seeding it.
+        if not field_map.get("title"):
+            skipped += 1
+            continue
+        # socrata.py reads status_field from the config TOP LEVEL, not from
+        # field_map. Relocate the discovered status column so the seeded source
+        # actually applies open-status filtering.
+        status_field = field_map.pop("status_field", None)
+        config: dict = {
+            "domain": candidate["domain"],
+            "dataset_id": candidate["dataset_id"],
+            "field_map": field_map,
+        }
+        if status_field:
+            config["status_field"] = status_field
         name = candidate.get("name") or candidate["dataset_id"]
         session.add(
             SourceConfig(
                 name=f"{name} (Auto-discovered)",
                 source_type="socrata",
                 enabled=False,
-                config_json=json.dumps(
-                    {
-                        "domain": candidate["domain"],
-                        "dataset_id": candidate["dataset_id"],
-                        "field_map": candidate.get("suggested_field_map") or {},
-                    }
-                ),
+                config_json=json.dumps(config),
                 notes=(
                     "Auto-discovered via Socrata catalog; verify field_map and "
                     "enable before scraping"
