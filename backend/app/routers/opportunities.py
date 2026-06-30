@@ -48,6 +48,7 @@ from app.services.logistics_extractor import (
 )
 from app.services.logistics_qa import (
     get_latest_logistics_qa,
+    get_latest_logistics_qa_map,
     run_logistics_qa,
     run_logistics_qa_for_status,
 )
@@ -56,6 +57,7 @@ from app.services.pursuit_workflow import (
     run_pursuit_prep_for_status,
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
+from app.services.local_chat_context import to_naive_utc
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
@@ -100,9 +102,9 @@ def review_queue(
         if source_id is not None:
             source = session.get(SourceConfig, source_id)
             source_name = source.name if source else "no-such-source"
-        latest_qa = {
-            opp.id: get_latest_logistics_qa(opp.id, session) for opp in opportunities
-        }
+        # Batch-load the latest QA per opportunity in one query (avoids N+1).
+        qa_by_opp = get_latest_logistics_qa_map(session)
+        latest_qa = {opp.id: qa_by_opp.get(opp.id) for opp in opportunities}
 
     def keep(opp: Opportunity) -> bool:
         if status and (opp.review_status or "New") != status:
@@ -171,9 +173,9 @@ def logistics_qa_by_status(payload: LogisticsQAByStatusRequest) -> dict:
 def _review_sort_key(opp: Opportunity) -> tuple:
     review_rank = REVIEW_STATUS_ORDER.get(opp.review_status or "New", 2)
     has_due = 0 if opp.due_date else 1
-    due = opp.due_date or datetime.max
+    due = to_naive_utc(opp.due_date) if opp.due_date else datetime.max
     score = opp.bid_score if opp.bid_score is not None else -1e9
-    created = opp.created_at or datetime.min
+    created = to_naive_utc(opp.created_at) if opp.created_at else datetime.min
     return (review_rank, has_due, due, -score, -created.timestamp())
 
 

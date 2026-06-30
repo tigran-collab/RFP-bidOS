@@ -32,7 +32,10 @@ def parse_tables(html: str, base_url: str, portal_url: str | None = None) -> lis
         if not headers:
             continue
 
-        for row in table.find_all("tr"):
+        rows = table.find_all("tr")
+        # The first row supplied the headers; skip it so a <td>-based header row
+        # is not emitted as a bogus opportunity.
+        for row in rows[1:]:
             cells = row.find_all("td")
             if not cells or len(cells) < 2:
                 continue
@@ -101,9 +104,17 @@ def _looks_like_opportunity_row(values: dict[str, str], row_text: str) -> bool:
 
 
 def _first_value(values: dict[str, str], columns: tuple[str, ...]) -> str | None:
-    for column, value in values.items():
-        if value and any(expected in column for expected in columns):
-            return value
+    # Prefer an exact header match before falling back to substring matching,
+    # and try the expected tokens in priority order (most specific first) so a
+    # generic token like "name" cannot pre-empt a more specific "agency name".
+    for expected in columns:
+        for column, value in values.items():
+            if value and column == expected:
+                return value
+    for expected in columns:
+        for column, value in values.items():
+            if value and expected in column:
+                return value
     return None
 
 

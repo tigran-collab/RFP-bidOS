@@ -206,14 +206,7 @@ def run_logistics_qa(opportunity_id: int, session) -> dict:
     }
 
 
-def get_latest_logistics_qa(opportunity_id: int, session) -> dict | None:
-    record = session.exec(
-        select(BidLogisticsQA)
-        .where(BidLogisticsQA.opportunity_id == opportunity_id)
-        .order_by(BidLogisticsQA.checked_at.desc())
-    ).first()
-    if record is None:
-        return None
+def _logistics_qa_dict(record: BidLogisticsQA) -> dict:
     return {
         "id": record.id,
         "opportunity_id": record.opportunity_id,
@@ -228,6 +221,35 @@ def get_latest_logistics_qa(opportunity_id: int, session) -> dict | None:
         ),
         "checked_at": record.checked_at.isoformat() if record.checked_at else None,
     }
+
+
+def get_latest_logistics_qa(opportunity_id: int, session) -> dict | None:
+    record = session.exec(
+        select(BidLogisticsQA)
+        .where(BidLogisticsQA.opportunity_id == opportunity_id)
+        .order_by(BidLogisticsQA.checked_at.desc())
+    ).first()
+    if record is None:
+        return None
+    return _logistics_qa_dict(record)
+
+
+def get_latest_logistics_qa_map(session) -> dict[int, dict]:
+    """Latest QA record per opportunity id, in a single query.
+
+    Equivalent to calling get_latest_logistics_qa for every opportunity but
+    without the N+1 round-trips. Rows are read newest-first (same ordering as
+    get_latest_logistics_qa) and the first seen per opportunity_id wins, so the
+    selected record matches the single-row lookup.
+    """
+    records = session.exec(
+        select(BidLogisticsQA).order_by(BidLogisticsQA.checked_at.desc())
+    ).all()
+    latest: dict[int, dict] = {}
+    for record in records:
+        if record.opportunity_id not in latest:
+            latest[record.opportunity_id] = _logistics_qa_dict(record)
+    return latest
 
 
 def run_logistics_qa_for_status(status: str, session, limit: int = 10) -> dict:

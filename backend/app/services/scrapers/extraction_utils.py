@@ -287,13 +287,16 @@ def extract_q_and_a_deadline(text: str) -> datetime | None:
 
 def extract_solicitation_number(text: str) -> str | None:
     patterns = (
-        r"(?:solicitation|bid|rfp|rfq|ifb|itb|project)\s*(?:number|no\.?|#)?\s*[:#-]\s*([A-Za-z0-9][A-Za-z0-9._/-]{2,})",
-        r"\b(?:RFP|RFQ|IFB|ITB)\s*[-#:]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{2,})",
+        r"(?:solicitation|bid|rfp|rfq|ifb|itb|project)\s*(?:number|no\.?|#)?\s*[:#-]\s*([A-Za-z0-9][A-Za-z0-9._/-]{1,})",
+        r"\b(?:RFP|RFQ|IFB|ITB)\s*[-#:]?\s*([A-Za-z0-9][A-Za-z0-9._/-]{1,})",
     )
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            return match.group(1).strip(" .;,")
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            candidate = match.group(1).strip(" .;,")
+            # Real solicitation numbers contain at least one digit; this rejects
+            # prose matches like "RFP for ..." capturing the stopword "for".
+            if candidate and any(ch.isdigit() for ch in candidate):
+                return candidate
     return None
 
 
@@ -333,7 +336,7 @@ def extract_location(text: str) -> str | None:
 
 def extract_estimated_value(text: str) -> float | None:
     match = re.search(
-        r"(?:estimated value|budget|contract value|not to exceed)\s*[:#-]?\s*\$?\s*([0-9][0-9,]*(?:\.\d{2})?)",
+        r"(?:estimated value|budget|contract value|not to exceed)\s*[:#-]?\s*\$?\s*([0-9][0-9,]*(?:\.\d+)?)",
         text,
         flags=re.IGNORECASE,
     )
