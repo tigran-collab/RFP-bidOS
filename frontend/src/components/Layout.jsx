@@ -24,7 +24,9 @@ export default function Layout({ children, currentPage, onNavigate }) {
           </button>
         ))}
       </nav>
-      <main className="page">{children}</main>
+      <main className="page" key={currentPage}>
+        {children}
+      </main>
     </div>
   );
 }

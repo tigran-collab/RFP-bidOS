@@ -729,6 +729,124 @@ textarea {
   word-break: break-word;
 }
 
+/* ---- Motion / flare ---- */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes brand-sheen {
+  to {
+    background-position: 200% center;
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px var(--accent-ring);
+    opacity: 0.9;
+  }
+  50% {
+    box-shadow: 0 0 18px var(--accent-ring), 0 0 30px rgba(34, 211, 238, 0.45);
+    opacity: 1;
+  }
+}
+
+@keyframes underline-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Page content fades in on each navigation (Layout keys <main> on the route). */
+.page {
+  animation: fade-in-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Animated gradient sheen across the brand wordmark + a breathing accent dot. */
+.brand {
+  background-size: 200% auto;
+  animation: brand-sheen 7s linear infinite;
+}
+.brand::before {
+  animation: pulse-glow 3.2s ease-in-out infinite;
+}
+
+/* Metric cards reveal in a quick stagger. */
+.metrics-grid .metric {
+  animation: fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.metrics-grid .metric:nth-child(1) {
+  animation-delay: 0.04s;
+}
+.metrics-grid .metric:nth-child(2) {
+  animation-delay: 0.09s;
+}
+.metrics-grid .metric:nth-child(3) {
+  animation-delay: 0.14s;
+}
+.metrics-grid .metric:nth-child(4) {
+  animation-delay: 0.19s;
+}
+.metrics-grid .metric:nth-child(5) {
+  animation-delay: 0.24s;
+}
+.metrics-grid .metric:nth-child(6) {
+  animation-delay: 0.29s;
+}
+.metrics-grid .metric:nth-child(n + 7) {
+  animation-delay: 0.34s;
+}
+
+/* Sliding accent underline under the active nav item. */
+.top-nav button {
+  position: relative;
+}
+.top-nav button[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 0.85rem;
+  right: 0.85rem;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-bright), var(--accent-2));
+  transform-origin: left center;
+  animation: underline-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Tactile button press. */
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Keyboard focus ring for accessibility. */
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 760px) {
   .top-nav {
