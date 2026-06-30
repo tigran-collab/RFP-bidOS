@@ -43,18 +43,18 @@ function formatResult(result) {
   if (result.sources_scraped !== undefined) {
     return (
       `${result.sources_scraped} sources scraped, ` +
-      `${result.records_found} kept${relevance}, ` +
-      `${result.created_count} created, ` +
+      `${result.records_found ?? 0} kept${relevance}, ` +
+      `${result.created_count ?? 0} created, ` +
       `${result.updated_count || 0} updated, ` +
-      `${result.skipped_duplicates} duplicates skipped`
+      `${result.skipped_duplicates ?? 0} duplicates skipped`
     );
   }
 
   return (
-    `${result.records_found} kept${relevance}, ` +
-    `${result.created_count} created, ` +
+    `${result.records_found ?? 0} kept${relevance}, ` +
+    `${result.created_count ?? 0} created, ` +
     `${result.updated_count || 0} updated, ` +
-    `${result.skipped_duplicates} duplicates skipped`
+    `${result.skipped_duplicates ?? 0} duplicates skipped`
   );
 }
 

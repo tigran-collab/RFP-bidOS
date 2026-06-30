@@ -21,7 +21,11 @@ async function request(path, options = {}) {
     }
     throw new Error(detail);
   }
-  return response.json();
+  if (response.status === 204) {
+    return null;
+  }
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function jsonRequest(path, payload, method = "POST") {

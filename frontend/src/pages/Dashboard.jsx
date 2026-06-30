@@ -70,6 +70,12 @@ export default function Dashboard({ onOpenOpportunity }) {
   }
 
   const counts = data?.counts || {};
+  const {
+    upcoming_deadlines = [],
+    top_opportunities = [],
+    needs_action = [],
+    source_health = [],
+  } = data || {};
   const openOpportunity = (id) => onOpenOpportunity && onOpenOpportunity(id);
 
   return (
@@ -108,7 +114,7 @@ export default function Dashboard({ onOpenOpportunity }) {
       </div>
 
       <h2>Upcoming Deadlines (next 30 days)</h2>
-      {!data.upcoming_deadlines.length ? (
+      {!upcoming_deadlines.length ? (
         <p>No upcoming deadlines.</p>
       ) : (
         <table className="data-table">
@@ -125,7 +131,7 @@ export default function Dashboard({ onOpenOpportunity }) {
             </tr>
           </thead>
           <tbody>
-            {data.upcoming_deadlines.map((item) => (
+            {upcoming_deadlines.map((item) => (
               <tr key={item.id}>
                 <td>
                   <button
@@ -152,7 +158,7 @@ export default function Dashboard({ onOpenOpportunity }) {
       )}
 
       <h2>Top Opportunities</h2>
-      {!data.top_opportunities.length ? (
+      {!top_opportunities.length ? (
         <p>No opportunities yet.</p>
       ) : (
         <table className="data-table">
@@ -167,7 +173,7 @@ export default function Dashboard({ onOpenOpportunity }) {
             </tr>
           </thead>
           <tbody>
-            {data.top_opportunities.map((item) => (
+            {top_opportunities.map((item) => (
               <tr key={item.id}>
                 <td>
                   <button
@@ -192,11 +198,11 @@ export default function Dashboard({ onOpenOpportunity }) {
       )}
 
       <h2>Needs Action</h2>
-      {!data.needs_action.length ? (
+      {!needs_action.length ? (
         <p>Nothing needs action right now.</p>
       ) : (
         <ul className="needs-action-list">
-          {data.needs_action.slice(0, 15).map((item) => (
+          {needs_action.slice(0, 15).map((item) => (
             <li key={item.id}>
               <button
                 className="link-button"
@@ -216,7 +222,7 @@ export default function Dashboard({ onOpenOpportunity }) {
       )}
 
       <h2>Source Health</h2>
-      {!data.source_health.length ? (
+      {!source_health.length ? (
         <p>No sources configured.</p>
       ) : (
         <table className="data-table">
@@ -232,7 +238,7 @@ export default function Dashboard({ onOpenOpportunity }) {
             </tr>
           </thead>
           <tbody>
-            {data.source_health.map((source) => (
+            {source_health.map((source) => (
               <tr key={source.id}>
                 <td>{source.name}</td>
                 <td>{source.state || ""}</td>

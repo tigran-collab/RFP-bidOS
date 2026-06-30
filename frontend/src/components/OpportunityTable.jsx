@@ -7,8 +7,8 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString();
 }
 
-export default function OpportunityTable({ opportunities, onOpenOpportunity }) {
-  if (!opportunities.length) {
+export default function OpportunityTable({ opportunities = [], onOpenOpportunity }) {
+  if (!opportunities?.length) {
     return <p>No opportunities found.</p>;
   }
 
