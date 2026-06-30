@@ -34,6 +34,7 @@ gracefully rather than crashing the whole scrape.
 """
 
 import json
+import time
 from datetime import datetime
 
 import requests
@@ -85,15 +86,78 @@ class SocrataAdapter:
         return results
 
     def _fetch_rows(self, domain: str, dataset_id: str, config: dict) -> list[dict]:
+        """Fetch all rows for a dataset, paginating with $limit/$offset.
+
+        Pages are fetched of size ``page_size`` (config "limit", default 1000)
+        and accumulated until a short page is returned or the hard ``max_rows``
+        cap (config "max_rows", default 10000) is reached. Offset paging needs a
+        deterministic order, so $order defaults to ":id" when unset. Each page
+        request is retried with backoff, and a polite throttle is applied
+        between pages.
+        """
         url = f"https://{domain}/resource/{dataset_id}.json"
-        params = {"$limit": int(config.get("limit") or 500)}
-        if config.get("order"):
-            params["$order"] = config["order"]
+        page_size = int(config.get("limit") or 1000)
+        max_rows = int(config.get("max_rows") or 10000)
+        throttle = float(config.get("throttle_seconds") or 0.3)
+
+        base_params = {}
+        # Stable ordering is required for offset paging not to skip/repeat rows.
+        base_params["$order"] = config.get("order") or ":id"
         if config.get("where"):
-            params["$where"] = config["where"]
+            base_params["$where"] = config["where"]
         headers = {"User-Agent": SOCRATA_USER_AGENT, "Accept": "application/json"}
         if config.get("app_token"):
             headers["X-App-Token"] = str(config["app_token"])
+
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            params = dict(base_params)
+            params["$limit"] = page_size
+            params["$offset"] = offset
+            page = self._fetch_page_with_retry(url, params, headers, config)
+            rows.extend(page)
+
+            if len(page) < page_size:
+                break
+            if len(rows) >= max_rows:
+                # Stop cleanly at the cap rather than paging forever.
+                rows = rows[:max_rows]
+                break
+
+            offset += page_size
+            if throttle:
+                time.sleep(throttle)
+
+        return rows
+
+    def _fetch_page_with_retry(
+        self, url: str, params: dict, headers: dict, config: dict
+    ) -> list[dict]:
+        """Fetch a single page, retrying on transient network/5xx errors."""
+        attempts = int(config.get("retry_attempts") or 3)
+        backoff = float(config.get("retry_backoff") if config.get("retry_backoff") is not None else 0.5)
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._fetch_page(url, params, headers)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_exc = exc
+            except requests.HTTPError as exc:
+                # Only server errors (5xx) are transient and worth retrying.
+                # Client errors (4xx) are permanent, so re-raise immediately.
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status is not None and status < 500:
+                    raise
+                last_exc = exc
+            if attempt < attempts and backoff:
+                time.sleep(attempt * backoff)
+        if last_exc is not None:
+            raise last_exc
+        return []
+
+    def _fetch_page(self, url: str, params: dict, headers: dict) -> list[dict]:
+        """Perform one HTTP request and return its JSON list (or [])."""
         response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
         response.raise_for_status()
         data = response.json()

@@ -8,6 +8,9 @@ network or depending on a live dataset.
 import json
 from types import SimpleNamespace
 
+import pytest
+import requests
+
 from app.services.scrapers.socrata import SocrataAdapter
 
 CONFIG = {
@@ -217,3 +220,98 @@ def test_missing_required_config_raises(monkeypatch):
         assert False, "expected ValueError for missing dataset_id/title"
     except ValueError:
         pass
+
+
+# --- Pagination / retry / cap (Part A): these stub _fetch_page, not _fetch_rows ---
+
+FAST_CONFIG = {"throttle_seconds": 0, "retry_backoff": 0}
+
+
+def test_fetch_rows_paginates_until_short_page(monkeypatch):
+    # Two full pages of 2 rows, then a short page of 1 -> 5 rows total.
+    adapter = SocrataAdapter()
+    pages = [
+        [{"id": 1}, {"id": 2}],
+        [{"id": 3}, {"id": 4}],
+        [{"id": 5}],
+    ]
+    offsets_seen = []
+
+    def fake_page(url, params, headers):
+        offsets_seen.append(params["$offset"])
+        return pages.pop(0)
+
+    monkeypatch.setattr(adapter, "_fetch_page", fake_page)
+    config = {"limit": 2, **FAST_CONFIG}
+
+    rows = adapter._fetch_rows("data.example.gov", "abcd-1234", config)
+
+    assert [r["id"] for r in rows] == [1, 2, 3, 4, 5]
+    # Offsets advance by page_size for each subsequent page.
+    assert offsets_seen == [0, 2, 4]
+
+
+def test_fetch_rows_retries_then_succeeds(monkeypatch):
+    # First two attempts raise ConnectionError, third succeeds (single page).
+    adapter = SocrataAdapter()
+    calls = {"n": 0}
+
+    def flaky_page(url, params, headers):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise requests.ConnectionError("boom")
+        return [{"id": 1}]  # short page -> stop
+
+    monkeypatch.setattr(adapter, "_fetch_page", flaky_page)
+    config = {"limit": 5, **FAST_CONFIG}
+
+    rows = adapter._fetch_rows("data.example.gov", "abcd-1234", config)
+
+    assert calls["n"] == 3
+    assert [r["id"] for r in rows] == [1]
+
+
+def test_fetch_rows_raises_after_exhausting_retries(monkeypatch):
+    adapter = SocrataAdapter()
+
+    def always_timeout(url, params, headers):
+        raise requests.Timeout("slow")
+
+    monkeypatch.setattr(adapter, "_fetch_page", always_timeout)
+    config = {"limit": 5, "retry_attempts": 3, **FAST_CONFIG}
+
+    with pytest.raises(requests.Timeout):
+        adapter._fetch_rows("data.example.gov", "abcd-1234", config)
+
+
+def test_fetch_rows_stops_at_max_rows_cap(monkeypatch):
+    # Every page is full, so without a cap this would page forever.
+    adapter = SocrataAdapter()
+    page_count = {"n": 0}
+
+    def full_page(url, params, headers):
+        page_count["n"] += 1
+        return [{"id": params["$offset"] + i} for i in range(params["$limit"])]
+
+    monkeypatch.setattr(adapter, "_fetch_page", full_page)
+    config = {"limit": 2, "max_rows": 5, **FAST_CONFIG}
+
+    rows = adapter._fetch_rows("data.example.gov", "abcd-1234", config)
+
+    # Capped at exactly max_rows and stops (does not loop indefinitely).
+    assert len(rows) == 5
+    assert page_count["n"] == 3  # pages of 2 -> 2,4,6 accumulated then trimmed
+
+
+def test_fetch_rows_defaults_order_to_id_for_stable_paging(monkeypatch):
+    adapter = SocrataAdapter()
+    captured = {}
+
+    def capture_page(url, params, headers):
+        captured.update(params)
+        return []  # short page -> single fetch
+
+    monkeypatch.setattr(adapter, "_fetch_page", capture_page)
+    adapter._fetch_rows("data.example.gov", "abcd-1234", {"limit": 5, **FAST_CONFIG})
+
+    assert captured["$order"] == ":id"

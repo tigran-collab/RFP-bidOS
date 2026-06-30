@@ -24,6 +24,10 @@ from app.services.scraper import (
     scrape_source,
 )
 from app.seed_sources import seed_real_sources
+from app.services.scrapers.socrata_discovery import (
+    discover_socrata_sources,
+    seed_discovered_sources,
+)
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.dashboard import get_operations_dashboard
 from app.services.exports import (
@@ -245,6 +249,85 @@ def seed_sources_command() -> None:
         f"{result['updated']} updated, "
         f"{result['skipped_existing']} already present, "
         f"{result['total_curated']} curated total"
+    )
+
+
+@cli.command("discover-socrata-sources")
+def discover_socrata_sources_command(
+    query: str = typer.Option(
+        None,
+        "--query",
+        help="Comma-separated catalog query terms (overrides the defaults).",
+    ),
+    limit: int = typer.Option(20, "--limit", help="Max datasets per query term."),
+    no_probe: bool = typer.Option(
+        False, "--no-probe", help="Skip per-dataset column probing."
+    ),
+    seed: bool = typer.Option(
+        False,
+        "--seed",
+        help="Seed procurement candidates as DISABLED socrata sources.",
+    ),
+) -> None:
+    """Discover candidate procurement datasets from the Socrata catalog.
+
+    Without --seed, prints a table of candidates. With --seed, inserts each
+    procurement candidate not already configured as a DISABLED socrata source
+    for human verification (field maps are best-guess and must be checked).
+    """
+    import json as _json
+
+    queries = None
+    if query:
+        queries = [part.strip() for part in query.split(",") if part.strip()]
+
+    candidates = discover_socrata_sources(
+        queries=queries, limit_per_query=limit, probe=not no_probe
+    )
+    procurement = [c for c in candidates if c.get("is_procurement")]
+    others = [c for c in candidates if not c.get("is_procurement")]
+
+    if not seed:
+        typer.echo(
+            f"Discovered {len(candidates)} gov candidate(s): "
+            f"{len(procurement)} procurement, {len(others)} other"
+        )
+        typer.echo("\n== Procurement candidates ==")
+        if not procurement:
+            typer.echo("  (none)")
+        for candidate in procurement:
+            typer.echo(
+                f"  [{candidate['domain']}] {candidate['dataset_id']} | "
+                f"{candidate['name'][:60]}"
+            )
+            typer.echo(
+                f"      field_map: {_json.dumps(candidate.get('suggested_field_map') or {})}"
+            )
+            if candidate.get("probe_error"):
+                typer.echo(f"      probe_error: {candidate['probe_error']}")
+        typer.echo("\n== Other gov candidates (not procurement-shaped) ==")
+        if not others:
+            typer.echo("  (none)")
+        for candidate in others:
+            note = (
+                f" probe_error: {candidate['probe_error']}"
+                if candidate.get("probe_error")
+                else ""
+            )
+            typer.echo(
+                f"  [{candidate['domain']}] {candidate['dataset_id']} | "
+                f"{candidate['name'][:60]}{note}"
+            )
+        return
+
+    init_db()
+    with Session(engine) as session:
+        result = seed_discovered_sources(session, candidates)
+
+    typer.echo(
+        f"Seed complete: {result['created']} created (disabled), "
+        f"{result['skipped']} already present "
+        f"({len(procurement)} procurement candidate(s) considered)"
     )
 
 

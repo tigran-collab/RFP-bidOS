@@ -331,6 +331,23 @@ Notes:
 - Government portal structures change frequently; scraper results always require human review.
 - Login-required sources are skipped cleanly until a future authenticated-source phase.
 
+### Socrata Source Discovery
+
+Many governments publish procurement data to Socrata open-data portals. The `discover-socrata-sources` command queries the public Socrata catalog for procurement-related terms, filters to government-looking domains, optionally probes each dataset's columns to guess whether it holds bids, and proposes a best-guess field map.
+
+```cmd
+cd backend
+python -m app.cli discover-socrata-sources
+python -m app.cli discover-socrata-sources --query "bids,solicitations" --limit 30
+python -m app.cli discover-socrata-sources --no-probe
+python -m app.cli discover-socrata-sources --seed
+```
+
+- Without `--seed`, it prints a table of candidates, clearly separating procurement-shaped datasets from other government datasets, with each candidate's suggested field map.
+- With `--seed`, each procurement candidate that is not already configured is inserted as a **DISABLED** `socrata` SourceConfig. Seeding is idempotent (it echoes created vs. skipped counts) and never enables a source automatically.
+- Auto-discovered field maps are **best-guess only** and must be verified by a human before enabling and scraping. The seeded source's notes call this out.
+- The catalog query and per-dataset probe are the only network calls, both via the public Socrata API (no key).
+
 ## Future Authenticated Sources / BidNet Placeholder
 
 - Public scraping is supported for generic public procurement pages.
