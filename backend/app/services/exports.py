@@ -7,6 +7,7 @@ no AI, no PDF generation.
 
 import csv
 import io
+from datetime import UTC, datetime
 
 from sqlmodel import select
 
@@ -16,6 +17,9 @@ from app.models import (
     Opportunity,
     Requirement,
 )
+
+ICS_PRODID = "-//RFP BidOS//Deadlines//EN"
+ICS_EXCLUDED_STATUSES = {"Archived", "Do Not Pursue"}
 
 OPPORTUNITY_COLUMNS = [
     "id",
@@ -216,3 +220,117 @@ def export_logistics_qa_csv(session, opportunity_id: int | None = None) -> str:
             }
         )
     return _write_csv(LOGISTICS_QA_COLUMNS, rows)
+
+
+def _ics_escape(value) -> str:
+    """Escape text per RFC 5545: backslash, comma, semicolon, and newlines."""
+    if value is None:
+        return ""
+    text = str(value)
+    text = text.replace("\\", "\\\\")
+    text = text.replace(",", "\\,")
+    text = text.replace(";", "\\;")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+    return text
+
+
+def _ics_date(value: datetime) -> str:
+    """Format the date portion of a datetime as an all-day VALUE=DATE string."""
+    return value.strftime("%Y%m%d")
+
+
+def _ics_timestamp(value: datetime | None) -> str:
+    """Format a UTC DTSTAMP value (YYYYMMDDTHHMMSSZ)."""
+    if value is None:
+        value = datetime.now(UTC).replace(tzinfo=None)
+    return value.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ics_event(opp: Opportunity, kind: str, date_value: datetime, summary: str, dtstamp: str) -> list[str]:
+    description_parts = []
+    if opp.agency:
+        description_parts.append(f"Agency: {opp.agency}")
+    if opp.source_url:
+        description_parts.append(f"Source: {opp.source_url}")
+    if opp.submission_method:
+        description_parts.append(f"Submission: {opp.submission_method}")
+    description = " | ".join(description_parts)
+
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:{opp.id}-{kind}@rfp-bidos",
+        f"DTSTAMP:{dtstamp}",
+        f"DTSTART;VALUE=DATE:{_ics_date(date_value)}",
+        f"SUMMARY:{_ics_escape(summary)}",
+    ]
+    if description:
+        lines.append(f"DESCRIPTION:{_ics_escape(description)}")
+    lines.extend(
+        [
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            "TRIGGER:-P2D",
+            f"DESCRIPTION:{_ics_escape('Reminder: ' + summary)}",
+            "END:VALARM",
+            "END:VEVENT",
+        ]
+    )
+    return lines
+
+
+def export_deadlines_ics(session, opportunity_id: int | None = None) -> str:
+    """Return an RFC 5545 VCALENDAR string of opportunity deadlines.
+
+    Emits an all-day VEVENT (with a 2-day display reminder) for each present
+    deadline date among due_date, q_and_a_deadline, and pre_bid_date. Filtered
+    to a single opportunity when opportunity_id is given; otherwise excludes
+    Archived/Do Not Pursue. Read-only; no network, no AI.
+    """
+    statement = select(Opportunity).order_by(Opportunity.id)
+    if opportunity_id is not None:
+        statement = statement.where(Opportunity.id == opportunity_id)
+    opportunities = list(session.exec(statement).all())
+    if opportunity_id is None:
+        opportunities = [
+            o for o in opportunities if (o.review_status or "New") not in ICS_EXCLUDED_STATUSES
+        ]
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        f"PRODID:{ICS_PRODID}",
+        "CALSCALE:GREGORIAN",
+    ]
+
+    for opp in opportunities:
+        dtstamp = _ics_timestamp(opp.updated_at or opp.created_at)
+        if opp.due_date:
+            lines.extend(
+                _ics_event(opp, "due", opp.due_date, f"Bid Due: {opp.title}", dtstamp)
+            )
+        if opp.q_and_a_deadline:
+            lines.extend(
+                _ics_event(
+                    opp,
+                    "qa",
+                    opp.q_and_a_deadline,
+                    f"Q&A Deadline: {opp.title}",
+                    dtstamp,
+                )
+            )
+        if opp.pre_bid_date:
+            label = "Pre-Bid Meeting"
+            if opp.pre_bid_mandatory:
+                label += " (MANDATORY)"
+            lines.extend(
+                _ics_event(
+                    opp,
+                    "prebid",
+                    opp.pre_bid_date,
+                    f"{label}: {opp.title}",
+                    dtstamp,
+                )
+            )
+
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"

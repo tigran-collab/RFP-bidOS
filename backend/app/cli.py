@@ -27,11 +27,13 @@ from app.seed_sources import seed_real_sources
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.dashboard import get_operations_dashboard
 from app.services.exports import (
+    export_deadlines_ics,
     export_documents_csv,
     export_logistics_qa_csv,
     export_opportunities_csv,
     export_requirements_csv,
 )
+from app.services.notifications import build_digest, render_digest_text
 from app.services.logistics_extractor import (
     apply_logistics_all,
     apply_logistics_for_status,
@@ -626,6 +628,62 @@ def export_logistics_qa_command(
     with Session(engine) as session:
         content = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
     _write_export(content, output)
+
+
+@cli.command("export-deadlines")
+def export_deadlines_command(
+    output: str = typer.Option("exports/deadlines.ics", "--output"),
+    opportunity_id: int = typer.Option(None, "--opportunity-id"),
+) -> None:
+    """Export bid/Q&A/pre-bid deadlines as an RFC 5545 .ics calendar."""
+    with Session(engine) as session:
+        content = export_deadlines_ics(session, opportunity_id=opportunity_id)
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="")
+    event_count = content.count("BEGIN:VEVENT")
+    typer.echo(f"Wrote {event_count} event(s) to {path}")
+
+
+@cli.command("digest")
+def digest_command(
+    days: int = typer.Option(7, "--days", help="Look-back/look-ahead window in days"),
+    limit: int = typer.Option(50, "--limit", help="Max items per section"),
+) -> None:
+    """Print a notification digest of new, upcoming, and at-risk opportunities."""
+    with Session(engine) as session:
+        digest = build_digest(session, days=days, limit=limit)
+    typer.echo(render_digest_text(digest))
+
+
+@cli.command("daily-run")
+def daily_run_command(
+    days: int = typer.Option(7, "--days", help="Digest window in days"),
+    skip_scrape: bool = typer.Option(
+        False, "--skip-scrape", help="Skip scraping enabled sources (offline)"
+    ),
+) -> None:
+    """Scrape enabled sources, score all opportunities, and print a digest."""
+    from app.services.daily_run import daily_run
+
+    with Session(engine) as session:
+        result = daily_run(session, do_scrape=not skip_scrape, days=days)
+
+    scrape = result["scrape"]
+    if scrape.get("skipped"):
+        typer.echo("Scrape: skipped")
+    else:
+        typer.echo(
+            f"Scrape: {scrape['sources_scraped']} source(s), "
+            f"{scrape['created']} created, {scrape['updated']} updated, "
+            f"{scrape['skipped_duplicates']} skipped duplicates, "
+            f"{len(scrape['errors'])} error(s)"
+        )
+        for err in scrape["errors"]:
+            typer.echo(f"  error: {err}")
+    typer.echo(f"Scored: {result['scored']} opportunity(ies)")
+    typer.echo("")
+    typer.echo(render_digest_text(result["digest"]))
 
 
 @cli.command("dashboard")

@@ -425,6 +425,43 @@ python -m app.cli dashboard
 
 API: `GET /dashboard/operations`. The frontend Dashboard page renders summary cards, upcoming deadlines, top opportunities, the needs-action list, and a source-health table.
 
+## Notification Digest
+
+A read-only daily heads-up summarizing what changed and what needs attention. It is deterministic (no AI, no network) and groups opportunities into three buckets: newly relevant opportunities created in the look-back window, deadlines due within the window, and at-risk items (past due or high deadline risk). Archived and Do Not Pursue items are excluded from deadline/risk buckets.
+
+```cmd
+cd backend
+python -m app.cli digest
+python -m app.cli digest --days 14 --limit 25
+```
+
+API: `GET /dashboard/digest` (optional `days` default 7, `limit` default 50) returns the structured digest. The digest is review-only and never modifies records.
+
+## Calendar Export
+
+Export bid due dates, Q&A deadlines, and pre-bid meeting dates as a standard RFC 5545 `.ics` calendar that imports into Outlook, Google Calendar, or Apple Calendar. Each deadline becomes an all-day event with a display reminder 2 days before. By default Archived and Do Not Pursue opportunities are excluded; pass an opportunity id to export a single opportunity's deadlines.
+
+```cmd
+cd backend
+python -m app.cli export-deadlines --output exports/deadlines.ics
+python -m app.cli export-deadlines --opportunity-id 1
+```
+
+The CLI creates the `exports/` directory if missing and prints the event count. API: `GET /exports/deadlines.ics` (optional `opportunity_id`) returns a `text/calendar` download.
+
+## Daily Run
+
+`daily-run` chains the daily intake into one command: it scrapes all enabled sources (reusing the same per-source scraper as `scrape-enabled-sources`, continuing on per-source errors), re-scores all opportunities, and prints a notification digest. It is CLI-only by design - a synchronous network scrape over HTTP is undesirable.
+
+```cmd
+cd backend
+python -m app.cli daily-run
+python -m app.cli daily-run --days 14
+python -m app.cli daily-run --skip-scrape
+```
+
+Use `--skip-scrape` to re-score and refresh the digest without touching the network. There is no HTTP endpoint for `daily-run`.
+
 ## Review Queue
 
 Scraped opportunities enter a human-controlled review workflow:

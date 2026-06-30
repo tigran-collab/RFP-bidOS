@@ -4,6 +4,7 @@ from sqlmodel import Session
 
 from app.db import engine
 from app.services.exports import (
+    export_deadlines_ics,
     export_documents_csv,
     export_logistics_qa_csv,
     export_opportunities_csv,
@@ -52,3 +53,14 @@ def export_logistics_qa(opportunity_id: int | None = Query(default=None)) -> Res
     with Session(engine) as session:
         content = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
     return _csv_response(content, "logistics_qa.csv")
+
+
+@router.get("/deadlines.ics")
+def export_deadlines(opportunity_id: int | None = Query(default=None)) -> Response:
+    with Session(engine) as session:
+        content = export_deadlines_ics(session, opportunity_id=opportunity_id)
+    return Response(
+        content=content,
+        media_type="text/calendar",
+        headers={"Content-Disposition": "attachment; filename=deadlines.ics"},
+    )
