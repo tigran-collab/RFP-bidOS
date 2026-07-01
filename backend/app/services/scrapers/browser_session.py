@@ -32,7 +32,45 @@ Never call `playwright install` from application code.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
+
+
+def _browser_channels() -> list[str | None]:
+    """Preferred browser launch channels, first that launches wins.
+
+    Prefers the user's REAL system browser (Edge/Chrome) over Playwright's
+    bundled Chromium, which on Windows is frequently blocked or removed by
+    antivirus ("spawn UNKNOWN" / "Executable doesn't exist"). ``None`` means the
+    bundled Chromium. Override with RFP_BIDOS_BROWSER_CHANNEL (e.g. "chrome",
+    "msedge", or "chromium").
+    """
+    override = os.environ.get("RFP_BIDOS_BROWSER_CHANNEL", "").strip().lower()
+    if override:
+        return [None] if override == "chromium" else [override]
+    if sys.platform == "win32":
+        return ["msedge", "chrome", None]
+    return ["chrome", "chromium", None]
+
+
+def _launch_persistent_context(pw, profile_dir: str, headless: bool):
+    """Launch a persistent context, trying system browsers before bundled Chromium.
+
+    The same channel order is used everywhere so the persisted login session is
+    reused by the same browser for later headless scrapes.
+    """
+    errors = []
+    for channel in _browser_channels():
+        kwargs = {"headless": headless}
+        if channel:
+            kwargs["channel"] = channel
+        try:
+            return pw.chromium.launch_persistent_context(profile_dir, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - try the next channel
+            label = channel or "chromium"
+            errors.append(f"{label}: {str(exc).splitlines()[0] if str(exc) else type(exc).__name__}")
+    raise RuntimeError("No launchable browser. Tried -> " + "; ".join(errors))
 
 # Best-effort selectors for pre-filling the login form. These are only
 # conveniences for the human; if none match, the human simply types the
@@ -136,10 +174,7 @@ def assisted_login(
 
     with sync_playwright() as pw:
         try:
-            context = pw.chromium.launch_persistent_context(
-                profile_dir,
-                headless=False,
-            )
+            context = _launch_persistent_context(pw, profile_dir, headless=False)
         except Exception as exc:  # noqa: BLE001 - surface a clear operator message
             first_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
             return {
@@ -245,7 +280,7 @@ def fetch_authenticated_json(
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
     with sync_playwright() as pw:
-        context = pw.chromium.launch_persistent_context(profile_dir, headless=True)
+        context = _launch_persistent_context(pw, profile_dir, headless=True)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(api_url, timeout=timeout_ms, wait_until="commit")
@@ -290,7 +325,7 @@ def fetch_authenticated_html(
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
     with sync_playwright() as pw:
-        context = pw.chromium.launch_persistent_context(profile_dir, headless=True)
+        context = _launch_persistent_context(pw, profile_dir, headless=True)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(page_url, timeout=timeout_ms)
