@@ -302,14 +302,16 @@ python -m app.cli parse-opportunity-documents <opportunity_id>
 
 Some portals hide documents behind JavaScript or login and will require future controlled support.
 
-Scraper limitations:
+Scraper policy and limitations:
 
-- Public pages only.
-- No login portals or credential submission.
-- No CAPTCHA bypass.
-- No browser automation or Playwright.
-- No recursive whole-site crawling.
-- No automated submissions.
+- Public data only. No login portals or credential submission, and no scraping behind a login wall.
+- **Coverage approach is API-first hybrid.** Preferred order for a source:
+  1. A documented/open API (e.g. Socrata SODA).
+  2. A portal's own JSON/XHR endpoint called directly with `requests` (the same call the site's JavaScript makes) — no browser required.
+  3. Headless-browser rendering (Playwright) **only as a selective fallback** for portals with no reachable API, behind an explicit per-source flag.
+- Automated access respects each site's robots.txt, terms of service, and rate limits, and applies polite throttling. No CAPTCHA bypass and no anti-detection/stealth-evasion tooling (reading public data is fine; defeating access controls is out of scope).
+- No recursive whole-site crawling; detail-page following is bounded and same-domain by default.
+- No automated bid submissions.
 - Extracted fields require human review.
 
 ## Real Source Seeding
@@ -527,4 +529,6 @@ API: `POST /opportunities/{id}/pursuit-prep` (optional `{"steps": [...]}`) and `
 
 ## Scope Notes
 
-This project currently avoids proposal drafting, OCR, Playwright automation, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.
+This project currently avoids proposal drafting, OCR, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.
+
+Scraping approach is **API-first hybrid** (see "Scraper policy and limitations" above): documented/open APIs and portals' own JSON endpoints are preferred; headless-browser rendering (Playwright) is permitted **only as a selective, flagged fallback** for JS-rendered portals that expose no reachable API — with robots.txt/ToS/rate-limit respect and no evasion of access controls. This amends the earlier blanket "no browser automation" note to reflect that most JS portals can be reached via their underlying JSON API without a browser, and that the browser fallback is a deliberate, bounded option for the remainder.
