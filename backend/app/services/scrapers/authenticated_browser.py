@@ -132,6 +132,11 @@ class AuthenticatedBrowserAdapter:
 
         wait_selector = config.get("wait_selector")
         profile_dir = profile_dir_for_source(source_config)
+        # Some portals (e.g. WAF-protected ones) refuse headless automation even
+        # with a valid session. Setting "fetch_headless": false reuses the session
+        # in a VISIBLE browser window, which reads like a real browser. Default is
+        # headless (no window).
+        fetch_headless = config.get("fetch_headless", True)
 
         try:
             html = fetch_authenticated_html(
@@ -139,6 +144,7 @@ class AuthenticatedBrowserAdapter:
                 profile_dir,
                 wait_selector=wait_selector,
                 timeout_seconds=self.timeout,
+                headless=fetch_headless,
             )
         except SessionExpiredError as exc:
             self.diagnostics.append(

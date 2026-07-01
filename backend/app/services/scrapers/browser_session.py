@@ -257,6 +257,7 @@ def fetch_authenticated_json(
     api_url: str,
     profile_dir: str,
     timeout_seconds: int = 45,
+    headless: bool = True,
 ):
     """Fetch JSON from ``api_url`` using the persisted (already-authenticated)
     profile, HEADLESSLY.
@@ -280,7 +281,7 @@ def fetch_authenticated_json(
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
     with sync_playwright() as pw:
-        context = _launch_persistent_context(pw, profile_dir, headless=True)
+        context = _launch_persistent_context(pw, profile_dir, headless=headless)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(api_url, timeout=timeout_ms, wait_until="commit")
@@ -303,6 +304,7 @@ def fetch_authenticated_html(
     profile_dir: str,
     wait_selector: str | None = None,
     timeout_seconds: int = 45,
+    headless: bool = True,
 ) -> str:
     """Fetch the rendered HTML of ``page_url`` using the persisted profile, HEADLESSLY.
 
@@ -325,7 +327,7 @@ def fetch_authenticated_html(
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
     with sync_playwright() as pw:
-        context = _launch_persistent_context(pw, profile_dir, headless=True)
+        context = _launch_persistent_context(pw, profile_dir, headless=headless)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(page_url, timeout=timeout_ms)

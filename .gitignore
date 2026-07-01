@@ -24,3 +24,6 @@ prompt_*.txt
 context.txt
 exports/
 backend/exports/
+
+# portal fetch debug dumps
+backend/data/portal_debug_*.html

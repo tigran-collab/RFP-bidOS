@@ -91,9 +91,10 @@ def test_row_field_map_extraction(monkeypatch):
     _force_playwright(monkeypatch)
     captured = {}
 
-    def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45):
+    def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45, headless=True):
         captured["page_url"] = page_url
         captured["wait_selector"] = wait_selector
+        captured["headless"] = headless
         return ROW_HTML
 
     monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)

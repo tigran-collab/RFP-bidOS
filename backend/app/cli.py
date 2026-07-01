@@ -1292,6 +1292,63 @@ def portal_login_command(
         raise typer.Exit(code=1)
 
 
+@cli.command("portal-fetch-debug")
+def portal_fetch_debug_command(
+    source_id: int,
+    url: str = typer.Option(None, "--url", help="Page to fetch; defaults to the source's config list_url"),
+    out: str = typer.Option(None, "--out", help="Where to save the rendered HTML"),
+    headed: bool = typer.Option(
+        True, "--headed/--headless", help="Reuse the session in a visible window (default) or headless"
+    ),
+) -> None:
+    """Fetch a logged-in page via the persisted session and save the rendered HTML.
+
+    Diagnostic aid: reuses the source's browser profile to fetch a page (a
+    solicitations/search results URL), writing the rendered HTML to a file so
+    the list/row/field selectors can be finalized — or so a WAF 403 vs. a real
+    page can be told apart. Uses a visible window by default (`--headless` to
+    hide). Nothing is submitted; this only reads a page you can already see.
+    """
+    from app.services.scrapers import browser_session
+    from app.services.scrapers.planetbids import profile_dir_for_source
+
+    if not browser_session.playwright_available():
+        typer.echo("Playwright not installed; run pip install + playwright install chromium.", err=True)
+        raise typer.Exit(code=1)
+
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+        config = _load_source_config(source)
+        page_url = url or config.get("list_url")
+        profile_dir = profile_dir_for_source(source)
+
+    if not page_url or "TODO" in str(page_url):
+        typer.echo("No usable URL. Pass --url with the logged-in solicitations page.", err=True)
+        raise typer.Exit(code=1)
+
+    out_path = Path(out) if out else Path("data") / f"portal_debug_{source_id}.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    typer.echo(f"Fetching {page_url} via the saved session ({'visible' if headed else 'headless'})...")
+    try:
+        html = browser_session.fetch_authenticated_html(
+            page_url, profile_dir, timeout_seconds=60, headless=not headed
+        )
+    except browser_session.SessionExpiredError as exc:
+        typer.echo(f"Session expired / blocked: {exc}", err=True)
+        raise typer.Exit(code=1)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"Fetch failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    out_path.write_text(html, encoding="utf-8")
+    typer.echo(f"Saved {len(html)} chars to {out_path}")
+    typer.echo(f"First 300 chars: {html[:300]!r}")
+
+
 def _slug_for_name(name: str) -> str:
     slug = "".join(char if char.isalnum() else "-" for char in (name or "").lower())
     while "--" in slug:
