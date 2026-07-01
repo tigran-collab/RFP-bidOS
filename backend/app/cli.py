@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -52,7 +53,11 @@ from app.services.pursuit_workflow import (
     run_pursuit_prep_for_status,
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
-from app.services.source_credentials import update_source_auth_status
+from app.services.source_credentials import (
+    CREDENTIAL_TYPE_KEYRING,
+    update_source_auth_status,
+)
+from app.services import credential_store
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
 
@@ -200,6 +205,42 @@ def seed_demo() -> None:
             auth_status="Unsupported This Phase",
             portal_type="BidNet",
             notes="Authenticated BidNet scraping is intentionally not implemented yet.",
+        ),
+        # Disabled PlanetBids assisted-login template. Replace the placeholder
+        # cid with a real agency/company id, run `set-credentials` and
+        # `portal-login`, then enable it. No real credentials or cid are seeded.
+        SourceConfig(
+            name="Demo PlanetBids Assisted-Login Template",
+            source_type="planetbids",
+            base_url="https://vendors.planetbids.com/portal/00000/bo/bo-search",
+            login_url="https://vendors.planetbids.com/portal/00000/bo/bo-search",
+            enabled=False,
+            requires_credentials=True,
+            credential_type="Keyring",
+            portal_type="PlanetBids",
+            config_json=json.dumps(
+                {
+                    "cid": 0,
+                    "api_base": "https://api-external.prod.planetbids.com",
+                    "bids_path": "/papi/bids",
+                    "params": {"per_page": 100, "page": 1},
+                    "portal_bid_url_template": (
+                        "https://vendors.planetbids.com/portal/{cid}/bo/bo-detail/{bid_id}"
+                    ),
+                    "agency": "Example Agency",
+                    "field_map": {
+                        "id": "id",
+                        "title": "title",
+                        "solicitation_number": "bidNumber",
+                        "due_date": "dueDate",
+                        "description": "description",
+                    },
+                }
+            ),
+            notes=(
+                "Assisted-login PlanetBids template (disabled). Set the real cid "
+                "in config_json, run set-credentials and portal-login, then enable."
+            ),
         ),
     ]
 
@@ -1120,6 +1161,147 @@ def preview_enabled_sources_command(
             typer.echo(f"  filter reasons: {summary}")
         if result["errors"]:
             typer.echo(f"  errors: {'; '.join(result['errors'])}")
+
+
+def _keyring_ref_for_source(source: SourceConfig) -> str:
+    return source.credential_secret_ref or f"rfp-bidos:{source.id}"
+
+
+@cli.command("set-credentials")
+def set_credentials_command(
+    source_id: int,
+    username: str = typer.Option(..., "--username", "-u", help="Portal login username"),
+) -> None:
+    """Store a source's portal password in the OS keychain (never the DB).
+
+    Prompts for the password without echoing it, stores it in the OS keychain
+    under a per-source reference, and records only the username + reference +
+    credential type on the SourceConfig. The password is never written to the
+    database, printed, or logged.
+    """
+    if not credential_store.is_available():
+        typer.echo(
+            "OS keychain (keyring) is not available. Install it with "
+            "`pip install keyring` and ensure your OS keychain is accessible.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+
+        ref = _keyring_ref_for_source(source)
+        # hide_input=True prevents the password from being echoed to the terminal.
+        password = typer.prompt("Portal password", hide_input=True)
+        store_result = credential_store.set_password(ref, username, password)
+        # Do not keep the plaintext around any longer than needed.
+        del password
+        if not store_result["ok"]:
+            typer.echo(store_result["message"], err=True)
+            raise typer.Exit(code=1)
+
+        source.credential_username = username
+        source.credential_secret_ref = ref
+        source.credential_type = CREDENTIAL_TYPE_KEYRING
+        source.requires_credentials = True
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        result = update_source_auth_status(source.id, session)
+
+    typer.echo(
+        f"Stored credentials for '{source.name}' in the OS keychain "
+        f"(username={username}, ref={ref}). Password not saved to the database."
+    )
+    _echo_auth_status(result)
+
+
+@cli.command("portal-login")
+def portal_login_command(
+    source_id: int,
+    timeout: int = typer.Option(
+        180, "--timeout", help="Seconds to wait for you to finish logging in"
+    ),
+) -> None:
+    """Open a visible browser to log in to a source's portal (assisted login).
+
+    You complete the login (and any CAPTCHA / MFA) in the opened window. The
+    authenticated session is persisted to a local browser profile and reused by
+    later scrapes. Re-run this when the session expires. The username/password
+    are pre-filled from the OS keychain when available; nothing is submitted
+    automatically.
+    """
+    from app.services.scrapers import browser_session
+    from app.services.scrapers.planetbids import profile_dir_for_source
+
+    if not browser_session.playwright_available():
+        typer.echo(
+            "Playwright is not installed. Run `pip install -r requirements.txt` "
+            "then `playwright install chromium` (one-time) before using "
+            "portal-login.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    with Session(engine) as session:
+        source = session.get(SourceConfig, source_id)
+        if source is None:
+            typer.echo(f"Source not found: {source_id}", err=True)
+            raise typer.Exit(code=1)
+
+        portal_url = source.login_url or source.base_url
+        if not portal_url:
+            typer.echo(
+                f"Source '{source.name}' has no login_url or base_url to open.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        username = source.credential_username
+        password = None
+        if username and source.credential_secret_ref:
+            password = credential_store.get_password(
+                source.credential_secret_ref, username
+            )
+        profile_dir = profile_dir_for_source(source)
+        config = _load_source_config(source)
+        success_substr = config.get("success_url_substring")
+
+    typer.echo(
+        f"Opening a browser for '{source.name}' at {portal_url}.\n"
+        "Complete the login (and any CAPTCHA/MFA) in the window that opens. "
+        "The window closes automatically once login is detected, or you can "
+        "close it when done."
+    )
+    result = browser_session.assisted_login(
+        portal_url,
+        profile_dir,
+        prefill_username=username,
+        prefill_password=password,
+        success_url_substring=success_substr,
+        timeout_seconds=timeout,
+    )
+    # Drop the plaintext password reference promptly.
+    del password
+    typer.echo(result["message"])
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+def _load_source_config(source: SourceConfig) -> dict:
+    raw = source.config_json
+    if not raw:
+        return {}
+    try:
+        import json as _json
+
+        parsed = _json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 @cli.command("check-source-auth")

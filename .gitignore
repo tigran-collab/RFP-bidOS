@@ -8,6 +8,8 @@ data/downloads/
 data/processed/
 backend/data/downloads/
 backend/data/processed/
+data/browser_profiles/
+backend/data/browser_profiles/
 frontend/dist/
 frontend/node_modules/
 desktop/node_modules/

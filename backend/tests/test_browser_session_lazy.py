@@ -1,0 +1,68 @@
+"""Assert the browser/PlanetBids modules import and degrade without Playwright.
+
+Playwright is an optional, heavy dependency. The app and full test suite must
+import and pass even when it is absent. These tests simulate the "not installed"
+case by forcing the lazy import to fail, then assert:
+
+  * the modules are already importable (they import fine regardless),
+  * playwright_available() reports False,
+  * the browser helpers raise a clear PlaywrightNotInstalledError,
+  * the PlanetBids adapter degrades to [] with a diagnostic instead of crashing.
+"""
+
+import builtins
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from app.services.scrapers import browser_session, planetbids
+from app.services.scrapers.browser_session import PlaywrightNotInstalledError
+
+
+@pytest.fixture
+def no_playwright(monkeypatch):
+    """Make any `import playwright...` raise ImportError."""
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "playwright" or name.startswith("playwright."):
+            raise ImportError("simulated: playwright not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def test_modules_are_importable_without_playwright():
+    # These imports already succeeded at module top; assert the key symbols
+    # exist so a lazy-import regression that moved a top-level import is caught.
+    assert hasattr(browser_session, "playwright_available")
+    assert hasattr(browser_session, "assisted_login")
+    assert hasattr(browser_session, "fetch_authenticated_json")
+    assert hasattr(planetbids, "PlanetBidsAuthAdapter")
+
+
+def test_playwright_available_false_when_missing(no_playwright):
+    assert browser_session.playwright_available() is False
+
+
+def test_helpers_raise_clear_error_when_missing(no_playwright):
+    with pytest.raises(PlaywrightNotInstalledError):
+        browser_session.assisted_login("https://example.gov", "/tmp/does-not-matter")
+    with pytest.raises(PlaywrightNotInstalledError):
+        browser_session.fetch_authenticated_json(
+            "https://example.gov/api", "/tmp/does-not-matter"
+        )
+
+
+def test_adapter_degrades_when_playwright_missing(no_playwright):
+    source = SimpleNamespace(
+        id=7,
+        source_type="planetbids",
+        name="PB",
+        config_json=json.dumps({"cid": 555, "field_map": {"title": "title"}}),
+    )
+    adapter = planetbids.PlanetBidsAuthAdapter()
+    results = adapter.scrape(source)
+    assert results == []
+    assert any("playwright is not installed" in d.lower() for d in adapter.diagnostics)

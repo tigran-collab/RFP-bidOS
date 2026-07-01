@@ -12,6 +12,7 @@ AUTH_STATUS_UNSUPPORTED = "Unsupported This Phase"
 CREDENTIAL_TYPE_MANUAL = "Manual"
 CREDENTIAL_TYPE_ENVIRONMENT = "Environment"
 CREDENTIAL_TYPE_FUTURE_SECRET_STORE = "Future Secret Store"
+CREDENTIAL_TYPE_KEYRING = "Keyring"
 
 
 def get_source_auth_status(source_config: SourceConfig) -> dict:
@@ -21,6 +22,9 @@ def get_source_auth_status(source_config: SourceConfig) -> dict:
     credential_type = _normalized_credential_type(source_config.credential_type)
     if credential_type == CREDENTIAL_TYPE_ENVIRONMENT:
         return check_environment_credentials(source_config)
+
+    if credential_type == CREDENTIAL_TYPE_KEYRING:
+        return check_keyring_credentials(source_config)
 
     if credential_type == CREDENTIAL_TYPE_FUTURE_SECRET_STORE:
         missing = []
@@ -63,6 +67,41 @@ def check_environment_credentials(source_config: SourceConfig) -> dict:
         "environment_password_var": password_var,
         "environment_username_present": username_present,
         "environment_password_present": password_present,
+    }
+
+
+def check_keyring_credentials(source_config: SourceConfig) -> dict:
+    """Report keyring credential readiness.
+
+    Ready requires: a username in the DB, a secret_ref in the DB, and a
+    matching password present in the OS keychain. The password value itself is
+    never read into the returned dict — only its presence is reported.
+    """
+    from app.services.credential_store import has_password, is_available
+
+    missing: list[str] = []
+    username = source_config.credential_username
+    secret_ref = source_config.credential_secret_ref
+    if not username:
+        missing.append("credential_username missing")
+    if not secret_ref:
+        missing.append("credential_secret_ref missing")
+
+    keyring_available = is_available()
+    password_present = False
+    if username and secret_ref and keyring_available:
+        password_present = has_password(secret_ref, username)
+
+    if not keyring_available:
+        missing.append("OS keychain (keyring) not available")
+    elif username and secret_ref and not password_present:
+        missing.append("password not stored in OS keychain")
+
+    status = AUTH_STATUS_CONFIGURED if not missing else AUTH_STATUS_NOT_CONFIGURED
+    return {
+        **_status(source_config, status, missing),
+        "keyring_available": keyring_available,
+        "keyring_password_present": password_present,
     }
 
 
@@ -134,6 +173,8 @@ def _normalized_credential_type(value: str | None) -> str | None:
         return CREDENTIAL_TYPE_ENVIRONMENT
     if normalized in {"future secret store", "future secretstore"}:
         return CREDENTIAL_TYPE_FUTURE_SECRET_STORE
+    if normalized in {"keyring", "keychain", "os keychain"}:
+        return CREDENTIAL_TYPE_KEYRING
     return value
 
 

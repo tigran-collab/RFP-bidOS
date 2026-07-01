@@ -371,6 +371,84 @@ python -m app.cli discover-socrata-sources --seed
   ```
 - API endpoint: `GET /sources/{id}/scraper-capabilities`
 
+## Authenticated Sources (assisted login)
+
+Some vendor portals (e.g. PlanetBids) only expose their bids list to a
+logged-in user. RFP BidOS supports these through **assisted login**: a real,
+visible browser where *you* complete the login (and any CAPTCHA / MFA). The app
+never solves CAPTCHAs, forges anti-bot tokens, or bypasses access controls — a
+genuine human login is the whole mechanism. Once you log in, the authenticated
+session is persisted locally and reused for later scrapes.
+
+### One-time setup
+
+```cmd
+cd backend
+python -m pip install -r requirements.txt
+playwright install chromium
+```
+
+`keyring` is lightweight and installed with the other requirements. `playwright`
+is heavier and only used by the browser path; it is imported lazily, so the app
+and the full test suite run without it. `playwright install chromium` downloads
+the browser binary and is a required one-time manual step for browser-based
+sources.
+
+### Configure a PlanetBids source
+
+Seed the disabled PlanetBids template (via `seed-demo`) or create a
+`source_type = "planetbids"` source, then set its real agency/company id
+(`cid`) in `config_json`. `config_json` accepts:
+
+```json
+{
+  "cid": 12345,
+  "api_base": "https://api-external.prod.planetbids.com",
+  "bids_path": "/papi/bids",
+  "params": {"per_page": 100, "page": 1},
+  "portal_bid_url_template": "https://vendors.planetbids.com/portal/{cid}/bo/bo-detail/{bid_id}",
+  "agency": "Example Agency",
+  "field_map": {"id": "id", "title": "title", "solicitation_number": "bidNumber", "due_date": "dueDate", "description": "description"}
+}
+```
+
+Only `cid` is required; the rest have PlanetBids-sensible defaults. The field
+map is config-driven so a portal's schema change degrades gracefully.
+
+### Store credentials and log in
+
+```cmd
+cd backend
+python -m app.cli set-credentials <source_id> --username you@example.com
+python -m app.cli portal-login <source_id>
+```
+
+- `set-credentials` prompts for the password **without echoing it** and stores
+  it in the **OS keychain** (macOS Keychain / Windows Credential Manager /
+  Secret Service). The password is **never** written to the SQLite database,
+  committed to git, printed, or logged — only the username and a keychain
+  reference are recorded on the source.
+- `portal-login` opens a visible browser at the source's `login_url`/`base_url`,
+  pre-filling the username/password from the keychain when present (nothing is
+  submitted automatically). **Log in once in that window and clear any
+  CAPTCHA/MFA.** The window closes when login is detected, or you can close it
+  yourself; the authenticated session is persisted to
+  `backend/data/browser_profiles/<source_id>/` (gitignored).
+
+### Scrape
+
+```cmd
+cd backend
+python -m app.cli check-source-auth <source_id>
+python -m app.cli scrape-source <source_id>
+```
+
+The scrape **reuses the persisted session** headlessly rather than logging in
+again, which keeps request volume low. When the session expires, the scrape
+returns no records with a clear diagnostic; just re-run `portal-login` to
+re-establish it. If Playwright is not installed, authenticated sources are
+skipped cleanly (empty result + diagnostic) instead of crashing the batch.
+
 ## Exports
 
 CSV exports are available for opportunities, requirements, documents, and logistics QA. They are intended for review, sharing, backup, and proposal planning. **No proposal PDFs are generated in this phase.**

@@ -8,7 +8,12 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import Document, Opportunity
-from app.services.scrapers import GenericPublicAdapter, ScraperResult, SocrataAdapter
+from app.services.scrapers import (
+    GenericPublicAdapter,
+    PlanetBidsAuthAdapter,
+    ScraperResult,
+    SocrataAdapter,
+)
 from app.services.scrapers.extraction_utils import (
     extract_document_candidates,
     is_document_url,
@@ -139,6 +144,8 @@ def _select_adapter(source_config, detail_limit: int | None):
     source_type = (getattr(source_config, "source_type", "") or "").lower()
     if source_type == "socrata":
         return SocrataAdapter()
+    if source_type == "planetbids":
+        return PlanetBidsAuthAdapter()
     if detail_limit is not None:
         return GenericPublicAdapter(detail_limit=detail_limit)
     return GenericPublicAdapter()
@@ -259,6 +266,15 @@ def _relevance_counts(
 
 
 def _auth_skip_message(source_config) -> str | None:
+    # PlanetBids uses assisted-login authenticated scraping: its adapter reads
+    # the bids list through a human-established, persisted browser session and
+    # degrades gracefully (returns [] + a diagnostic) when the session is
+    # missing/expired or Playwright is absent. So it is NOT skipped here even
+    # though it requires credentials.
+    source_type = (getattr(source_config, "source_type", "") or "").lower()
+    if source_type == "planetbids":
+        return None
+
     requires_credentials = bool(getattr(source_config, "requires_credentials", False))
     name = (getattr(source_config, "name", "") or "").lower()
     base_url = (getattr(source_config, "base_url", "") or "").lower()
