@@ -135,10 +135,23 @@ def assisted_login(
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
     with sync_playwright() as pw:
-        context = pw.chromium.launch_persistent_context(
-            profile_dir,
-            headless=False,
-        )
+        try:
+            context = pw.chromium.launch_persistent_context(
+                profile_dir,
+                headless=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface a clear operator message
+            first_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            return {
+                "ok": False,
+                "message": (
+                    "Could not open a visible browser window for login. The backend "
+                    "must run in your own desktop session to show a browser — start "
+                    "the app with start_rfp_bidos.bat or the desktop launcher (not as "
+                    "a background/service process), then try Log in again. "
+                    f"(details: {first_line})"
+                ),
+            }
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(portal_url, timeout=60_000)
