@@ -120,7 +120,9 @@ def _scrape_candidates(
         return []
 
     try:
-        return adapter.scrape(source_config)
+        candidates = adapter.scrape(source_config)
+        result["diagnostics"].extend(getattr(adapter, "diagnostics", []) or [])
+        return candidates
     except requests.RequestException as exc:
         result["errors"].append(str(exc))
     except Exception as exc:
@@ -471,6 +473,7 @@ def _empty_result() -> dict:
         "documents_discovered": 0,
         "documents_skipped": 0,
         "errors": [],
+        "diagnostics": [],
         "candidates": [],
     }
 

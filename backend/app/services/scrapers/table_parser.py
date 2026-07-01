@@ -59,6 +59,7 @@ def parse_tables(html: str, base_url: str, portal_url: str | None = None) -> lis
             results.append(
                 ScraperResult(
                     title=title or "Untitled opportunity",
+                    extraction_method="table_row",
                     agency=agency,
                     solicitation_number=solicitation,
                     source_url=detail_url or base_url,

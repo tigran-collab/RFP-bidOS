@@ -1045,6 +1045,8 @@ def preview_source_command(
 
     result = preview_source(source, include_filtered=show_filtered)
     _echo_scrape_result(source.name, result)
+    for diagnostic in result.get("diagnostics", []):
+        typer.echo(f"{source.name} diagnostic: {diagnostic}")
     for candidate in result.get("candidates", [])[:10]:
         typer.echo(
             f"- {candidate['title']} | due: {candidate.get('due_date') or '-'} | "

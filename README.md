@@ -327,7 +327,7 @@ Notes:
 
 - Seeded sources are public pages only - no login is required or attempted.
 - Seeding is idempotent; rerunning `seed-sources` does not create duplicates.
-- JavaScript-heavy portals (Cal eProcure, Texas ESBD, Arizona Procurement Portal, SF City Partner) are seeded disabled with notes, since the HTML scraper gets limited results from them.
+- JavaScript-heavy portals (Cal eProcure, Texas ESBD, Arizona Procurement Portal, SF City Partner) are seeded enabled with notes; the HTML scraper may return limited results from them, and results require human review.
 - Government portal structures change frequently; scraper results always require human review.
 - Login-required sources are skipped cleanly until a future authenticated-source phase.
 

@@ -3,8 +3,9 @@ Curated real-world public procurement sources for CA, TX, NV, and AZ.
 
 Rules:
 - Public pages only. No login-required sources are enabled.
-- JS-heavy single-page portals are seeded disabled with a note, since the
-  public-page scraper only parses server-rendered HTML.
+- JS-heavy single-page portals are enabled but carry notes, since the
+  public-page scraper only parses server-rendered HTML and may return limited
+  results.
 - Seeding is idempotent: existing rows are matched by base_url, then name,
   and are never duplicated.
 """
@@ -25,7 +26,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://caleprocure.ca.gov/pages/public-search.aspx",
         "portal_type": "Other",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "California state procurement public search. JavaScript portal; HTML scraper gets limited results. Review manually.",
     },
     {
@@ -75,7 +76,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://labavn.org/",
         "portal_type": "Other",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "LA Business Assistance Virtual Network. Listing details may require free registration; do not log in.",
     },
     {
@@ -91,7 +92,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://sfcitypartner.sfgov.org/",
         "portal_type": "Other",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "City and County of San Francisco contracting portal. JavaScript portal; limited HTML scraping.",
     },
     {
@@ -99,7 +100,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://procurement.sccgov.org/",
         "portal_type": "Generic Public",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "County procurement department. Verify URL and structure before enabling.",
     },
     {
@@ -107,7 +108,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.sanjoseca.gov/your-government/departments-offices/finance/purchasing-risk-management",
         "portal_type": "Generic Public",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "San Jose finance/purchasing page. Bids often run through Biddingo portal links.",
     },
     {
@@ -115,7 +116,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://business.metro.net/",
         "portal_type": "Other",
         "state": "CA",
-        "enabled": False,
+        "enabled": True,
         "notes": "Transit agency procurement portal. JavaScript portal; limited HTML scraping. Transit security contracts appear here.",
     },
     # --- Texas ---
@@ -124,7 +125,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.txsmartbuy.com/esbd",
         "portal_type": "Other",
         "state": "TX",
-        "enabled": False,
+        "enabled": True,
         "notes": "Texas state procurement public search. JavaScript portal; limited HTML scraping. Review manually.",
     },
     {
@@ -140,7 +141,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://dallascityhall.com/departments/office-procurement-services",
         "portal_type": "Generic Public",
         "state": "TX",
-        "enabled": False,
+        "enabled": True,
         "notes": "Dallas procurement office page. SSL certificate verification failed during smoke test (June 2026); verify manually before enabling.",
     },
     {
@@ -156,7 +157,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.sa.gov/Directory/Departments/Finance/Procurement",
         "portal_type": "Generic Public",
         "state": "TX",
-        "enabled": False,
+        "enabled": True,
         "notes": "San Antonio procurement directory page. Verify URL and structure before enabling.",
     },
     {
@@ -164,7 +165,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.fortworthtexas.gov/departments/finance/purchasing",
         "portal_type": "Generic Public",
         "state": "TX",
-        "enabled": False,
+        "enabled": True,
         "notes": "Fort Worth purchasing division page. Verify URL and structure before enabling.",
     },
     # --- Nevada ---
@@ -181,7 +182,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.clarkcountynv.gov/government/departments/finance/purchasing",
         "portal_type": "Generic Public",
         "state": "NV",
-        "enabled": False,
+        "enabled": True,
         "notes": "Clark County purchasing page returned 404 during smoke test (June 2026); bids likely moved to an external eProcurement portal. Verify manually before enabling.",
     },
     {
@@ -189,7 +190,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.lasvegasnevada.gov/Business/Purchasing-Contracts",
         "portal_type": "Generic Public",
         "state": "NV",
-        "enabled": False,
+        "enabled": True,
         "notes": "Las Vegas purchasing page. Verify URL and structure before enabling.",
     },
     {
@@ -205,7 +206,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.reno.gov/government/departments/finance/purchasing",
         "portal_type": "Generic Public",
         "state": "NV",
-        "enabled": False,
+        "enabled": True,
         "notes": "Reno purchasing page. Verify URL and structure before enabling.",
     },
     # --- Arizona ---
@@ -214,7 +215,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://app.az.gov/",
         "portal_type": "Other",
         "state": "AZ",
-        "enabled": False,
+        "enabled": True,
         "notes": "Arizona state procurement portal. JavaScript single-page app; limited HTML scraping. Review manually.",
     },
     {
@@ -279,7 +280,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.tucsonaz.gov/Departments/Business-Services",
         "portal_type": "Generic Public",
         "state": "AZ",
-        "enabled": False,
+        "enabled": True,
         "notes": "Tucson business services/procurement page. Verify URL and structure before enabling.",
     },
     {
@@ -287,7 +288,7 @@ REAL_PUBLIC_SOURCES: list[dict] = [
         "base_url": "https://www.pima.gov/199/Procurement",
         "portal_type": "Generic Public",
         "state": "AZ",
-        "enabled": False,
+        "enabled": True,
         "notes": "Pima County (Tucson area) procurement page. Verify URL and structure before enabling.",
     },
 ]

@@ -6,6 +6,7 @@ from typing import Protocol
 @dataclass
 class ScraperResult:
     title: str
+    extraction_method: str | None = None
     agency: str | None = None
     solicitation_number: str | None = None
     source_url: str | None = None
