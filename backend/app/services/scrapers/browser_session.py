@@ -148,6 +148,38 @@ def _ensure_profile_dir(profile_dir: str) -> str:
     return str(path)
 
 
+def _session_state_path(profile_dir: str) -> Path:
+    return Path(profile_dir) / "session_state.json"
+
+
+def _save_session_state(context, profile_dir: str) -> None:
+    """Persist the authenticated session (incl. session cookies) after login.
+
+    Playwright's persistent profile does not restore session cookies (no expiry)
+    on relaunch, which SSO logins rely on. Capturing storage_state while the
+    context is open lets a later fetch restore the exact session — the standard
+    "stay logged in" mechanism, using the user's own session, not evasion.
+    """
+    try:
+        state = context.storage_state()
+        _session_state_path(profile_dir).write_text(json.dumps(state), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _restore_session_state(context, profile_dir: str) -> None:
+    """Re-inject cookies saved by a prior login so the fetch is authenticated."""
+    try:
+        path = _session_state_path(profile_dir)
+        if not path.exists():
+            return
+        cookies = json.loads(path.read_text(encoding="utf-8")).get("cookies") or []
+        if cookies:
+            context.add_cookies(cookies)
+    except Exception:
+        pass
+
+
 def assisted_login(
     portal_url: str,
     profile_dir: str,
@@ -212,7 +244,9 @@ def assisted_login(
                 # Wait for the page/context to close, bounded by the timeout.
                 ok, message = _wait_until_closed(page, timeout_ms)
         finally:
-            # Closing persists the storage state to profile_dir.
+            # Capture the authenticated session (incl. session cookies) while the
+            # context is still open, then close (which persists the profile).
+            _save_session_state(context, profile_dir)
             try:
                 context.close()
             except Exception:
@@ -282,6 +316,7 @@ def fetch_authenticated_json(
 
     with sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
+        _restore_session_state(context, profile_dir)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(api_url, timeout=timeout_ms, wait_until="commit")
@@ -328,6 +363,7 @@ def fetch_authenticated_html(
 
     with sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
+        _restore_session_state(context, profile_dir)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(page_url, timeout=timeout_ms)
@@ -373,6 +409,7 @@ def capture_page(
         )
     with sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
+        _restore_session_state(context, profile_dir)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             response = page.goto(page_url, timeout=60_000)
