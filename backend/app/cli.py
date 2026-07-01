@@ -58,6 +58,7 @@ from app.services.source_credentials import (
     update_source_auth_status,
 )
 from app.services import credential_store
+from app.services.scrapers.portal_templates import get_template, list_templates
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
 
@@ -1289,6 +1290,291 @@ def portal_login_command(
     typer.echo(result["message"])
     if not result["ok"]:
         raise typer.Exit(code=1)
+
+
+def _slug_for_name(name: str) -> str:
+    slug = "".join(char if char.isalnum() else "-" for char in (name or "").lower())
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug.strip("-") or "portal"
+
+
+def add_portal_source(
+    session: Session,
+    *,
+    name: str,
+    template: str | None = None,
+    source_type: str | None = None,
+    login_url: str | None = None,
+    list_url: str | None = None,
+    portal_type: str | None = None,
+) -> dict:
+    """Create a DISABLED, credential-requiring SourceConfig for a new portal.
+
+    Two modes:
+      * template: prefill source_type/login_url/portal_type/config_json from the
+        portal catalog.
+      * explicit: pass source_type + login_url (and optional list_url) directly.
+
+    The credential_secret_ref is derived from the name (keyring service). The
+    source is created disabled with requires_credentials=True and
+    credential_type=Keyring so the operator runs set-credentials + portal-login
+    before enabling. Returns a summary dict; never stores any password.
+    """
+    if not name:
+        raise ValueError("name is required")
+
+    existing = session.exec(
+        select(SourceConfig).where(SourceConfig.name == name)
+    ).first()
+
+    config_json: str | None = None
+    if template:
+        tpl = get_template(template)
+        if tpl is None:
+            raise ValueError(
+                f"Unknown template '{template}'. "
+                f"Available: {', '.join(t['slug'] for t in list_templates())}"
+            )
+        source_type = source_type or tpl["source_type"]
+        login_url = login_url or tpl.get("login_url")
+        portal_type = portal_type or tpl.get("portal_type")
+        skeleton = tpl.get("config_json") or {}
+        # If the caller supplied a list_url, drop it into the skeleton.
+        if list_url and isinstance(skeleton, dict):
+            skeleton = {**skeleton, "list_url": list_url}
+        config_json = json.dumps(skeleton) if skeleton else None
+    else:
+        if not source_type:
+            raise ValueError("source-type is required without a template")
+        if not login_url:
+            raise ValueError("login-url is required without a template")
+        if list_url:
+            config_json = json.dumps({"list_url": list_url})
+
+    # A deterministic keyring service reference derived from the name so each
+    # portal keeps its own keychain entry. The actual password lives only in the
+    # OS keychain, added later via set-credentials.
+    secret_ref = f"rfp-bidos:{_slug_for_name(name)}"
+
+    source = SourceConfig(
+        name=name,
+        source_type=source_type,
+        base_url=login_url,
+        login_url=login_url,
+        enabled=False,
+        requires_credentials=True,
+        credential_type=CREDENTIAL_TYPE_KEYRING,
+        credential_secret_ref=secret_ref,
+        auth_status="Not Configured",
+        portal_type=portal_type,
+        config_json=config_json,
+        notes=(
+            "Authenticated portal added via add-portal (disabled). Run "
+            "set-credentials, portal-login, finalize config_json selectors, "
+            "then enable."
+        ),
+    )
+    session.add(source)
+    session.commit()
+    session.refresh(source)
+    return {
+        "source_id": source.id,
+        "name": source.name,
+        "source_type": source.source_type,
+        "credential_secret_ref": source.credential_secret_ref,
+        "existing_warning": (
+            f"A source named '{name}' already exists (id={existing.id}); "
+            "created another. Consider removing the duplicate."
+            if existing is not None
+            else None
+        ),
+    }
+
+
+@cli.command("list-portal-templates")
+def list_portal_templates_command() -> None:
+    """Print the available portal templates for add-portal."""
+    templates = list_templates()
+    typer.echo(f"{len(templates)} portal template(s):")
+    for tpl in templates:
+        typer.echo(
+            f"  {tpl['slug']:14} {tpl['display_name']:40} "
+            f"[{tpl['source_type']}]"
+        )
+
+
+@cli.command("add-portal")
+def add_portal_command(
+    name: str = typer.Option(..., "--name", help="Source display name (required)"),
+    template: str = typer.Option(
+        None, "--template", help="Template slug (see list-portal-templates)"
+    ),
+    source_type: str = typer.Option(
+        None, "--source-type", help="Explicit source type (without a template)"
+    ),
+    login_url: str = typer.Option(
+        None, "--login-url", help="Portal login URL (without a template)"
+    ),
+    list_url: str = typer.Option(
+        None, "--list-url", help="Bids list URL (fills config_json.list_url)"
+    ),
+) -> None:
+    """Create a DISABLED authenticated portal source, from a template or args.
+
+    Sets requires_credentials=True, credential_type=Keyring, and a per-source
+    keychain reference. No password is stored here. Echoes the next steps.
+    """
+    init_db()
+    with Session(engine) as session:
+        try:
+            result = add_portal_source(
+                session,
+                name=name,
+                template=template,
+                source_type=source_type,
+                login_url=login_url,
+                list_url=list_url,
+            )
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1)
+
+    if result["existing_warning"]:
+        typer.echo(f"WARNING: {result['existing_warning']}")
+    source_id = result["source_id"]
+    typer.echo(
+        f"Created disabled portal source [{source_id}] {result['name']} "
+        f"(source_type={result['source_type']}, "
+        f"credential ref={result['credential_secret_ref']})."
+    )
+    typer.echo("Next steps:")
+    typer.echo(f"  1. python -m app.cli set-credentials {source_id} --username you@example.com")
+    typer.echo(f"  2. python -m app.cli portal-login {source_id}")
+    typer.echo(
+        "  3. Finalize config_json (list_url / row_selector / field_map) from "
+        "your logged-in session if needed."
+    )
+    typer.echo(
+        f"  4. Enable the source (set enabled=True via the API/DB), then "
+        f"python -m app.cli scrape-source {source_id}."
+    )
+
+
+@cli.command("portal-login-all")
+def portal_login_all_command(
+    timeout: int = typer.Option(
+        180, "--timeout", help="Seconds to wait for each login"
+    ),
+) -> None:
+    """Run assisted login sequentially for every enabled credential source.
+
+    Each portal opens its own visible browser window. To avoid stacking many
+    windows at once, this pauses for confirmation between portals.
+    """
+    from app.services.scrapers import browser_session
+    from app.services.scrapers.planetbids import profile_dir_for_source
+
+    if not browser_session.playwright_available():
+        typer.echo(
+            "Playwright is not installed. Run `pip install -r requirements.txt` "
+            "then `playwright install chromium` (one-time) before using "
+            "portal-login-all.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    with Session(engine) as session:
+        sources = list(
+            session.exec(
+                select(SourceConfig).where(
+                    SourceConfig.enabled == True,  # noqa: E712
+                    SourceConfig.requires_credentials == True,  # noqa: E712
+                )
+            ).all()
+        )
+
+    if not sources:
+        typer.echo("No enabled credential-requiring sources to log in to.")
+        return
+
+    typer.echo(f"{len(sources)} portal(s) to log in to, one window at a time.")
+    for index, source in enumerate(sources, start=1):
+        portal_url = source.login_url or source.base_url
+        if not portal_url:
+            typer.echo(f"  [{source.id}] {source.name}: no login_url/base_url; skipping.")
+            continue
+
+        if index > 1:
+            typer.confirm(
+                f"Ready to open the login window for '{source.name}'?",
+                default=True,
+                abort=False,
+            )
+
+        username = source.credential_username
+        password = None
+        if username and source.credential_secret_ref:
+            password = credential_store.get_password(
+                source.credential_secret_ref, username
+            )
+        profile_dir = profile_dir_for_source(source)
+        success_substr = _load_source_config(source).get("success_url_substring")
+
+        typer.echo(f"Opening login for [{source.id}] {source.name} at {portal_url}")
+        result = browser_session.assisted_login(
+            portal_url,
+            profile_dir,
+            prefill_username=username,
+            prefill_password=password,
+            success_url_substring=success_substr,
+            timeout_seconds=timeout,
+        )
+        del password
+        typer.echo(f"  {result['message']}")
+
+
+@cli.command("scrape-authenticated-all")
+def scrape_authenticated_all_command() -> None:
+    """Scrape every enabled source served by an authenticated adapter.
+
+    Covers planetbids and authenticated_browser sources. Continues past
+    per-source failures (session expired, Playwright missing, etc.), collecting
+    counts and diagnostics. Reuses the standard scrape/persist path.
+    """
+    authenticated_types = {"planetbids", "authenticated_browser"}
+    with Session(engine) as session:
+        sources = list(
+            session.exec(
+                select(SourceConfig).where(SourceConfig.enabled == True)  # noqa: E712
+            ).all()
+        )
+    sources = [
+        s for s in sources if (s.source_type or "").lower() in authenticated_types
+    ]
+
+    if not sources:
+        typer.echo("No enabled authenticated sources to scrape.")
+        return
+
+    total_created = 0
+    total_updated = 0
+    for source in sources:
+        try:
+            result = run_scrape_for_source(source)
+        except Exception as exc:
+            typer.echo(f"{source.name}: scrape failed ({exc})")
+            continue
+        total_created += result["created_count"]
+        total_updated += result["updated_count"]
+        _echo_scrape_result(source.name, result)
+        for diagnostic in result.get("diagnostics", []):
+            typer.echo(f"  {source.name} diagnostic: {diagnostic}")
+
+    typer.echo(
+        f"Authenticated scrape complete: {len(sources)} source(s), "
+        f"{total_created} created, {total_updated} updated."
+    )
 
 
 def _load_source_config(source: SourceConfig) -> dict:

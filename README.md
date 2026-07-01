@@ -449,6 +449,84 @@ returns no records with a clear diagnostic; just re-run `portal-login` to
 re-establish it. If Playwright is not installed, authenticated sources are
 skipped cleanly (empty result + diagnostic) instead of crashing the batch.
 
+### Add many portals by config (no new code per portal)
+
+Beyond PlanetBids, authenticated portals (BidNet Direct, Bonfire, OpenGov,
+DemandStar, or any generic login-gated bids page) are added by **configuration**
+using the generic `authenticated_browser` adapter — no new Python per portal.
+Each portal keeps its own **keychain entry** and its own **browser profile**
+(`backend/data/browser_profiles/<source_id>/`).
+
+Start from a template in the catalog:
+
+```cmd
+cd backend
+python -m app.cli list-portal-templates
+python -m app.cli add-portal --template bidnet --name "City of Example BidNet"
+```
+
+`add-portal` creates a **disabled**, credential-requiring source and prints the
+next steps. You can also add one from explicit args instead of a template:
+
+```cmd
+python -m app.cli add-portal --name "Custom Portal" ^
+  --source-type authenticated_browser ^
+  --login-url https://portal.example.com/login ^
+  --list-url https://portal.example.com/bids
+```
+
+Then, per portal:
+
+```cmd
+python -m app.cli set-credentials <source_id> --username you@example.com
+python -m app.cli portal-login <source_id>
+```
+
+The `authenticated_browser` config lives in `config_json`:
+
+```json
+{
+  "list_url": "https://portal.example.com/bids",
+  "wait_selector": "table.bids",
+  "agency": "Example Agency",
+  "row_selector": "table.bids tbody tr",
+  "field_map": {
+    "title": "td.title a",
+    "solicitation_number": "td.number",
+    "due_date": "td.due",
+    "agency": "td.agency",
+    "source_url": "td.title a"
+  }
+}
+```
+
+Only `list_url` is required. If you omit `row_selector`/`field_map`, the adapter
+falls back to the **generic table parser** on the fetched HTML. For a new
+generic portal the row/field selectors typically need to be **finalized from a
+real logged-in session** — the templates seed placeholders (`TODO_...`), so open
+the saved bids-list page after `portal-login` and fill in the real CSS
+selectors. (This is why BidNet's selectors are placeholders, not guesses.)
+
+Enable the source, then scrape it like any other:
+
+```cmd
+python -m app.cli scrape-source <source_id>
+```
+
+### Batch commands across portals
+
+```cmd
+cd backend
+python -m app.cli portal-login-all          # assisted login, one window at a time
+python -m app.cli scrape-authenticated-all  # scrape every enabled authenticated source
+```
+
+`portal-login-all` opens each enabled credential source's visible login window
+sequentially (pausing between them so windows don't stack).
+`scrape-authenticated-all` scrapes every enabled `planetbids` /
+`authenticated_browser` source, continuing past per-source failures (e.g. an
+expired session) and reporting counts + diagnostics.
+
 ## Exports
 
 CSV exports are available for opportunities, requirements, documents, and logistics QA. They are intended for review, sharing, backup, and proposal planning. **No proposal PDFs are generated in this phase.**

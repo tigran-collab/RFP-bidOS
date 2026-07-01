@@ -250,6 +250,70 @@ def fetch_authenticated_json(
                 pass
 
 
+def fetch_authenticated_html(
+    page_url: str,
+    profile_dir: str,
+    wait_selector: str | None = None,
+    timeout_seconds: int = 45,
+) -> str:
+    """Fetch the rendered HTML of ``page_url`` using the persisted profile, HEADLESSLY.
+
+    Launches a headless persistent-context Chromium at the SAME ``profile_dir``
+    used by assisted_login, navigates to ``page_url``, optionally waits for
+    ``wait_selector`` to appear (so SPA-rendered rows have loaded), and returns
+    the page's rendered ``outerHTML``. This is a real browser context reusing a
+    real login; no headers are forged.
+
+    Raises:
+      PlaywrightNotInstalledError: Playwright is not installed.
+      SessionExpiredError: the persisted session is no longer authenticated
+        (login redirect / 401 / 403 / access-denied marker).
+    """
+    sync_playwright = _require_playwright()
+    if not Path(profile_dir).exists():
+        raise SessionExpiredError(
+            f"No persisted browser profile at {profile_dir}. Run assisted login first."
+        )
+    timeout_ms = max(1, int(timeout_seconds)) * 1000
+
+    with sync_playwright() as pw:
+        context = pw.chromium.launch_persistent_context(profile_dir, headless=True)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            response = page.goto(page_url, timeout=timeout_ms)
+            status = response.status if response is not None else None
+            final_url = page.url
+
+            if wait_selector:
+                try:
+                    page.wait_for_selector(wait_selector, timeout=timeout_ms)
+                except Exception:
+                    # A missing selector is not fatal on its own — the session
+                    # check below still runs, and an empty parse degrades to [].
+                    pass
+
+            html = _read_html(page)
+            _raise_if_session_expired(status, final_url, html, page_url)
+            return html
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+
+def _read_html(page) -> str:
+    try:
+        return page.content()
+    except Exception:
+        try:
+            return page.evaluate(
+                "() => document.documentElement ? document.documentElement.outerHTML : ''"
+            )
+        except Exception:
+            return ""
+
+
 def _read_body(page, response) -> str:
     """Return the response body text, preferring the raw HTTP body."""
     if response is not None:

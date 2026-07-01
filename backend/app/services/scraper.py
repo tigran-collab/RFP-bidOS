@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.models import Document, Opportunity
 from app.services.scrapers import (
+    AuthenticatedBrowserAdapter,
     GenericPublicAdapter,
     PlanetBidsAuthAdapter,
     ScraperResult,
@@ -146,6 +147,8 @@ def _select_adapter(source_config, detail_limit: int | None):
         return SocrataAdapter()
     if source_type == "planetbids":
         return PlanetBidsAuthAdapter()
+    if source_type == "authenticated_browser":
+        return AuthenticatedBrowserAdapter()
     if detail_limit is not None:
         return GenericPublicAdapter(detail_limit=detail_limit)
     return GenericPublicAdapter()
@@ -266,13 +269,14 @@ def _relevance_counts(
 
 
 def _auth_skip_message(source_config) -> str | None:
-    # PlanetBids uses assisted-login authenticated scraping: its adapter reads
-    # the bids list through a human-established, persisted browser session and
-    # degrades gracefully (returns [] + a diagnostic) when the session is
-    # missing/expired or Playwright is absent. So it is NOT skipped here even
-    # though it requires credentials.
+    # PlanetBids and the generic authenticated_browser adapter use assisted-login
+    # authenticated scraping: their adapters read the bids list through a
+    # human-established, persisted browser session and degrade gracefully
+    # (returns [] + a diagnostic) when the session is missing/expired or
+    # Playwright is absent. They self-gate, so they are NOT skipped here even
+    # though they require credentials.
     source_type = (getattr(source_config, "source_type", "") or "").lower()
-    if source_type == "planetbids":
+    if source_type in ("planetbids", "authenticated_browser"):
         return None
 
     requires_credentials = bool(getattr(source_config, "requires_credentials", False))
