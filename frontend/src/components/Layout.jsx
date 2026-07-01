@@ -5,6 +5,7 @@ const navItems = [
   { key: "reviewQueue", label: "Review Queue" },
   { key: "localAIChat", label: "Local AI Chat" },
   { key: "scraper", label: "Scraper" },
+  { key: "portals", label: "Portals" },
   { key: "settings", label: "Settings" },
 ];
 

@@ -296,7 +296,7 @@ class SourceConfigCreate(BaseModel):
     def validate_credential_type(cls, value: str | None) -> str | None:
         return _validate_choice(
             value,
-            {None, "Manual", "Environment", "Future Secret Store"},
+            {None, "Manual", "Environment", "Future Secret Store", "Keyring"},
             "credential_type",
         )
 
@@ -324,6 +324,7 @@ class SourceConfigCreate(BaseModel):
             {
                 None,
                 "Generic Public",
+                "Socrata Open Data",
                 "BidNet",
                 "PlanetBids",
                 "SAM.gov",
@@ -359,7 +360,7 @@ class SourceConfigUpdate(BaseModel):
     def validate_credential_type(cls, value: str | None) -> str | None:
         return _validate_choice(
             value,
-            {None, "Manual", "Environment", "Future Secret Store"},
+            {None, "Manual", "Environment", "Future Secret Store", "Keyring"},
             "credential_type",
         )
 
@@ -387,6 +388,7 @@ class SourceConfigUpdate(BaseModel):
             {
                 None,
                 "Generic Public",
+                "Socrata Open Data",
                 "BidNet",
                 "PlanetBids",
                 "SAM.gov",

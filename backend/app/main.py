@@ -7,6 +7,7 @@ from app.routers import (
     documents,
     exports,
     opportunities,
+    portals,
     scraper,
     sources,
 )
@@ -26,6 +27,7 @@ app.include_router(documents.router)
 app.include_router(scraper.router)
 app.include_router(analysis.router)
 app.include_router(sources.router)
+app.include_router(portals.router)
 app.include_router(dashboard.router)
 app.include_router(exports.router)
 

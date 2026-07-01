@@ -8,6 +8,7 @@ import Opportunities from "./pages/Opportunities.jsx";
 import NewOpportunity from "./pages/NewOpportunity.jsx";
 import ReviewQueue from "./pages/ReviewQueue.jsx";
 import Scraper from "./pages/Scraper.jsx";
+import Portals from "./pages/Portals.jsx";
 import Settings from "./pages/Settings.jsx";
 
 const pages = {
@@ -18,6 +19,7 @@ const pages = {
   localAIChat: LocalAIChatPage,
   opportunityDetail: OpportunityDetail,
   scraper: Scraper,
+  portals: Portals,
   settings: Settings,
 };
 

@@ -380,6 +380,14 @@ never solves CAPTCHAs, forges anti-bot tokens, or bypasses access controls — a
 genuine human login is the whole mechanism. Once you log in, the authenticated
 session is persisted locally and reused for later scrapes.
 
+> **In-app management (no terminal required).** Everything below can also be
+> done from the web UI's **Portals** tab: add a portal (from a template or
+> generic), enter credentials, run the assisted login, enable the source, and
+> scrape — all from `http://localhost:5173`. Credentials still live only in the
+> **OS keychain** (never the app database, never shown back to you), and the
+> assisted login still opens a visible browser for you to complete by hand. The
+> CLI commands below remain fully supported for scripting.
+
 ### One-time setup
 
 ```cmd

@@ -837,6 +837,36 @@ textarea {
   outline-offset: 2px;
 }
 
+/* ---- Portals tab ---- */
+.portal-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.portal-add-form .form-field {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+.portal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.portal-manage-panel {
+  margin: 0.5rem 0;
+}
+.portal-cred-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.portal-cred-fields .form-field {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
 /* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
   *,

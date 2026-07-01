@@ -179,3 +179,32 @@ export function getSourceScraperCapabilities(id) {
 export function seedSources() {
   return request("/sources/seed", { method: "POST" });
 }
+
+// ---- Portals (in-app authenticated portal management) ----
+export function getPortalTemplates() {
+  return request("/sources/portal-templates");
+}
+
+export function addPortal(payload) {
+  return jsonRequest("/sources/add-portal", payload, "POST");
+}
+
+export function setSourceCredentials(id, { username, password }) {
+  return jsonRequest(`/sources/${id}/credentials`, { username, password }, "PUT");
+}
+
+export function deleteSourceCredentials(id) {
+  return request(`/sources/${id}/credentials`, { method: "DELETE" });
+}
+
+export function startPortalLogin(id) {
+  return request(`/sources/${id}/portal-login`, { method: "POST" });
+}
+
+export function getLoginStatus(id) {
+  return request(`/sources/${id}/login-status`);
+}
+
+export function setSourceEnabled(id, enabled) {
+  return updateSource(id, { enabled });
+}

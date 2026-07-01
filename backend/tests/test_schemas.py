@@ -4,13 +4,41 @@ Regression guard for the pursuit-prep bug: "Review Requirements" must be an
 accepted next_action so saving an opportunity after pursuit prep does not 422.
 """
 
+from datetime import datetime
+
 import pytest
 from pydantic import ValidationError
 
 from app.schemas import (
     NEXT_ACTION_CHOICES,
     OpportunityReviewUpdate,
+    SourceConfigRead,
 )
+
+
+def test_source_read_accepts_all_real_portal_types():
+    # Regression: GET /sources 500'd (ResponseValidationError) because
+    # "Socrata Open Data" was dropped from the allowed portal_type set when the
+    # authenticated-portal types were added. Every portal_type present in the DB
+    # must validate through SourceConfigRead.
+    for portal_type in (
+        None,
+        "Socrata Open Data",
+        "Generic Public",
+        "BidNet",
+        "PlanetBids",
+        "Other",
+    ):
+        read = SourceConfigRead(
+            id=1,
+            name="s",
+            source_type="socrata",
+            base_url="https://example.gov",
+            enabled=True,
+            portal_type=portal_type,
+            created_at=datetime(2026, 1, 1),
+        )
+        assert read.portal_type == portal_type
 
 
 def test_review_requirements_is_a_valid_next_action():
