@@ -352,6 +352,50 @@ def fetch_authenticated_html(
                 pass
 
 
+def capture_page(
+    page_url: str,
+    profile_dir: str,
+    headless: bool = True,
+    settle_ms: int = 9000,
+) -> dict:
+    """Diagnostic: fetch a page via the persisted session and return what came back.
+
+    Unlike fetch_authenticated_html, this does NOT raise on 403 / login redirect;
+    it navigates, waits for the page to settle (network idle, best-effort), and
+    returns {status, final_url, html, title}. Used to tell a WAF block apart from
+    a real results page and to finalize selectors. A real browser reusing a real
+    login — no header forgery, no automation hiding.
+    """
+    sync_playwright = _require_playwright()
+    if not Path(profile_dir).exists():
+        raise SessionExpiredError(
+            f"No persisted browser profile at {profile_dir}. Run assisted login first."
+        )
+    with sync_playwright() as pw:
+        context = _launch_persistent_context(pw, profile_dir, headless=headless)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            response = page.goto(page_url, timeout=60_000)
+            status = response.status if response is not None else None
+            # Let SPA content / any redirect settle before capturing.
+            for state in ("domcontentloaded", "networkidle"):
+                try:
+                    page.wait_for_load_state(state, timeout=settle_ms)
+                except Exception:
+                    pass
+            return {
+                "status": status,
+                "final_url": page.url,
+                "title": (page.title() or "")[:120],
+                "html": _read_html(page),
+            }
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+
 def _read_html(page) -> str:
     try:
         return page.content()

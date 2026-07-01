@@ -1334,17 +1334,18 @@ def portal_fetch_debug_command(
 
     typer.echo(f"Fetching {page_url} via the saved session ({'visible' if headed else 'headless'})...")
     try:
-        html = browser_session.fetch_authenticated_html(
-            page_url, profile_dir, timeout_seconds=60, headless=not headed
-        )
+        result = browser_session.capture_page(page_url, profile_dir, headless=not headed)
     except browser_session.SessionExpiredError as exc:
-        typer.echo(f"Session expired / blocked: {exc}", err=True)
+        typer.echo(f"No session: {exc}", err=True)
         raise typer.Exit(code=1)
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"Fetch failed: {exc}", err=True)
         raise typer.Exit(code=1)
 
+    html = result.get("html") or ""
     out_path.write_text(html, encoding="utf-8")
+    typer.echo(f"HTTP {result.get('status')} | final URL: {result.get('final_url')}")
+    typer.echo(f"Title: {result.get('title')!r}")
     typer.echo(f"Saved {len(html)} chars to {out_path}")
     typer.echo(f"First 300 chars: {html[:300]!r}")
 
