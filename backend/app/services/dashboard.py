@@ -163,6 +163,10 @@ def _top_opportunities(opportunities: list[Opportunity], limit: int = 10) -> lis
     if not candidates:
         candidates = [o for o in opportunities if (o.review_status or "New") != "Archived"]
 
+    # Prefer the deterministic priority rank when any candidate has one; fall
+    # back to the historical bid_score ordering when ranks are absent.
+    has_priority = any(o.priority_rank is not None for o in candidates)
+
     def sort_key(o: Opportunity) -> tuple:
         return (
             TOP_STATUS_RANK.get(o.review_status or "New", 3),
@@ -172,7 +176,12 @@ def _top_opportunities(opportunities: list[Opportunity], limit: int = 10) -> lis
             to_naive_utc(o.due_date) if o.due_date else datetime.max,
         )
 
-    candidates.sort(key=sort_key)
+    def priority_sort_key(o: Opportunity) -> tuple:
+        has_rank = 0 if o.priority_rank is not None else 1
+        rank = o.priority_rank if o.priority_rank is not None else -1e9
+        return (has_rank, -rank, sort_key(o))
+
+    candidates.sort(key=priority_sort_key if has_priority else sort_key)
     return [_opp_brief(o) for o in candidates[:limit]]
 
 

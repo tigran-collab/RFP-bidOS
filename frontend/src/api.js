@@ -79,6 +79,10 @@ export function reviewOpportunity(id, payload) {
   return jsonRequest(`/opportunities/${id}/review`, payload, "PATCH");
 }
 
+export function prioritizeAll() {
+  return request("/opportunities/prioritize", { method: "POST" });
+}
+
 export function runPursuitPrep(id, steps) {
   const body = steps ? { steps } : {};
   return jsonRequest(`/opportunities/${id}/pursuit-prep`, body, "POST");

@@ -22,6 +22,7 @@ def init_db() -> None:
         _ensure_opportunity_review_columns()
         _ensure_opportunity_logistics_columns()
         _ensure_opportunity_relevance_columns()
+        _ensure_opportunity_priority_columns()
         _ensure_requirement_matrix_columns()
         _ensure_source_scraper_columns()
         _ensure_scrape_run_stat_columns()
@@ -134,6 +135,23 @@ def _ensure_opportunity_relevance_columns() -> None:
         "negative_matches_json": "VARCHAR",
         "as_needed_warning": "BOOLEAN DEFAULT 0",
         "relevance_reason": "VARCHAR",
+    }
+    with Session(engine) as session:
+        existing_columns = {
+            row[1] for row in session.exec(text("PRAGMA table_info(opportunity)")).all()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                session.exec(
+                    text(f"ALTER TABLE opportunity ADD COLUMN {column_name} {column_type}")
+                )
+        session.commit()
+
+
+def _ensure_opportunity_priority_columns() -> None:
+    columns = {
+        "priority_rank": "FLOAT",
+        "priority_tier": "VARCHAR",
     }
     with Session(engine) as session:
         existing_columns = {

@@ -54,6 +54,7 @@ from app.services.pursuit_workflow import (
     run_pursuit_prep_for_status,
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
+from app.services.prioritization import apply_priority_to_all
 from app.services.source_credentials import (
     CREDENTIAL_TYPE_KEYRING,
     update_source_auth_status,
@@ -616,6 +617,14 @@ def score_all_opportunities() -> None:
                 f"({scoring_result['score']})"
             )
         session.commit()
+
+
+@cli.command("prioritize-all")
+def prioritize_all_command() -> None:
+    """Compute deterministic priority rank/tier for every opportunity (no AI)."""
+    with Session(engine) as session:
+        updated = apply_priority_to_all(session)
+    typer.echo(f"Prioritized {updated} opportunity(ies)")
 
 
 def _echo_logistics(result: dict) -> None:

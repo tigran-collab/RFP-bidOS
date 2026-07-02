@@ -5,6 +5,7 @@ import {
   downloadOpportunityDocuments,
   extractOpportunityRequirements,
   getReviewQueue,
+  prioritizeAll,
   reviewOpportunity,
   runPursuitPrep,
 } from "../api.js";
@@ -45,6 +46,8 @@ export default function ReviewQueue({ onOpenOpportunity }) {
   const [priorityFilter, setPriorityFilter] = useState("");
   const [deadlineRiskFilter, setDeadlineRiskFilter] = useState("");
   const [qaRiskFilter, setQaRiskFilter] = useState("");
+  const [sortField, setSortField] = useState("priority");
+  const [sortDirection, setSortDirection] = useState("desc");
   const [selected, setSelected] = useState(() => new Set());
   const [notesDraft, setNotesDraft] = useState({});
   const [busyId, setBusyId] = useState(null);
@@ -59,6 +62,8 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         priority: priorityFilter,
         deadline_risk: deadlineRiskFilter,
         qa_risk: qaRiskFilter,
+        sort: sortField,
+        direction: sortDirection,
       });
       setOpportunities(result);
       setNotesDraft(
@@ -70,7 +75,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter, deadlineRiskFilter, qaRiskFilter]);
+  }, [statusFilter, priorityFilter, deadlineRiskFilter, qaRiskFilter, sortField, sortDirection]);
 
   useEffect(() => {
     loadQueue();
@@ -174,6 +179,18 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     await applyReview(id, { review_notes: notesDraft[id] || "" }, "notes saved");
   }
 
+  async function recomputePriorities() {
+    try {
+      setMessage("Recomputing priorities...");
+      const result = await prioritizeAll();
+      setMessage(`Priorities recomputed for ${result.updated} opportunity(ies).`);
+      setError("");
+      await loadQueue();
+    } catch (err) {
+      setError(err.message || "Failed to recompute priorities.");
+    }
+  }
+
   if (loading) {
     return <p>Loading...</p>;
   }
@@ -181,6 +198,11 @@ export default function ReviewQueue({ onOpenOpportunity }) {
   return (
     <section>
       <h1>Review Queue</h1>
+      <div className="review-toolbar">
+        <button type="button" onClick={recomputePriorities}>
+          Recompute priorities
+        </button>
+      </div>
       <div className="review-filters">
         <label>
           Review status
@@ -238,6 +260,30 @@ export default function ReviewQueue({ onOpenOpportunity }) {
             ))}
           </select>
         </label>
+        <label>
+          Sort by
+          <select
+            value={sortField}
+            onChange={(event) => setSortField(event.target.value)}
+          >
+            <option value="priority">Priority</option>
+            <option value="score">Bid score</option>
+            <option value="relevance">Relevance</option>
+            <option value="deadline">Deadline</option>
+            <option value="created">Recently added</option>
+            <option value="default">Default</option>
+          </select>
+        </label>
+        <label>
+          Direction
+          <select
+            value={sortDirection}
+            onChange={(event) => setSortDirection(event.target.value)}
+          >
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
       </div>
 
       {selected.size ? (
@@ -265,6 +311,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
           <thead>
             <tr>
               <th></th>
+              <th>Priority</th>
               <th>Title</th>
               <th>Agency / Source</th>
               <th>Due</th>
@@ -290,6 +337,16 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                     checked={selected.has(opp.id)}
                     onChange={() => toggleSelected(opp.id)}
                   />
+                </td>
+                <td className="priority-cell">
+                  {opp.priority_tier
+                    ? `${opp.priority_tier}${
+                        opp.priority_rank !== null &&
+                        opp.priority_rank !== undefined
+                          ? ` (${Math.round(opp.priority_rank)})`
+                          : ""
+                      }`
+                    : ""}
                 </td>
                 <td>
                   <button

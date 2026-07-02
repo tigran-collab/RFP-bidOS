@@ -53,6 +53,8 @@ class OpportunityCreate(BaseModel):
     negative_matches_json: str | None = None
     as_needed_warning: bool = False
     relevance_reason: str | None = None
+    priority_rank: float | None = None
+    priority_tier: str | None = None
 
     @field_validator("review_status")
     @classmethod

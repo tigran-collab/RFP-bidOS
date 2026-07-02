@@ -58,6 +58,7 @@ from app.services.pursuit_workflow import (
     run_pursuit_prep_for_status,
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
+from app.services.prioritization import apply_priority_to_all
 from app.services.local_chat_context import to_naive_utc
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
@@ -96,6 +97,8 @@ def review_queue(
     source_id: int | None = Query(default=None),
     deadline_risk: str | None = Query(default=None),
     qa_risk: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    direction: str | None = Query(default=None),
 ) -> list[dict]:
     with Session(engine) as session:
         opportunities = list(session.exec(select(Opportunity)).all())
@@ -133,7 +136,7 @@ def review_queue(
         return True
 
     filtered = [opp for opp in opportunities if keep(opp)]
-    filtered.sort(key=_review_sort_key)
+    _apply_sort(filtered, sort, direction)
 
     results = []
     for opp in filtered:
@@ -178,6 +181,66 @@ def _review_sort_key(opp: Opportunity) -> tuple:
     score = opp.bid_score if opp.bid_score is not None else -1e9
     created = to_naive_utc(opp.created_at) if opp.created_at else datetime.min
     return (review_rank, has_due, due, -score, -created.timestamp())
+
+
+def _priority_sort_key(opp: Opportunity) -> tuple:
+    # Highest priority_rank first; opportunities without a rank sort last, then
+    # fall back to the standard review ordering for stability.
+    has_rank = 0 if opp.priority_rank is not None else 1
+    rank = opp.priority_rank if opp.priority_rank is not None else -1e9
+    return (has_rank, -rank, _review_sort_key(opp))
+
+
+# Sortable fields for the review queue and their natural (default) direction.
+# All keep missing values last regardless of direction.
+_SORT_DEFAULT_DESC = {
+    "priority": True,   # highest priority first
+    "score": True,      # best bid_score first (bid decision)
+    "relevance": True,  # most relevant first
+    "deadline": False,  # soonest due first
+    "created": True,    # most recently added first
+}
+
+
+def _sort_value(opp: Opportunity, sort: str) -> float | None:
+    if sort == "priority":
+        return opp.priority_rank
+    if sort == "score":
+        return opp.bid_score
+    if sort == "relevance":
+        return opp.relevance_score
+    if sort == "deadline":
+        return to_naive_utc(opp.due_date).timestamp() if opp.due_date else None
+    if sort == "created":
+        return to_naive_utc(opp.created_at).timestamp() if opp.created_at else None
+    return None
+
+
+def _apply_sort(filtered: list, sort: str | None, direction: str | None) -> None:
+    """Sort in place. Unknown/None sort -> historical review ordering."""
+    key = (sort or "").lower()
+    if key not in _SORT_DEFAULT_DESC:
+        filtered.sort(key=_review_sort_key)
+        return
+    desc = _SORT_DEFAULT_DESC[key]
+    if direction in ("asc", "desc"):
+        desc = direction == "desc"
+    sign = -1.0 if desc else 1.0
+
+    def sort_key(opp: Opportunity) -> tuple:
+        value = _sort_value(opp, key)
+        if value is None:
+            return (1, 0.0)  # missing values always sort last
+        return (0, sign * float(value))
+
+    filtered.sort(key=sort_key)
+
+
+@router.post("/prioritize")
+def prioritize_opportunities() -> dict:
+    with Session(engine) as session:
+        updated = apply_priority_to_all(session)
+        return {"updated": updated}
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityRead)

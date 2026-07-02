@@ -684,7 +684,26 @@ python -m app.cli mark-opportunity 1 --status Pursue
 python -m app.cli mark-opportunity 2 --status "Do Not Pursue" --notes "Navigation noise"
 ```
 
-API: `GET /opportunities/review-queue` (filters: status, priority, state, min_score, max_score, service_type, source_id) and `PATCH /opportunities/{id}/review`. The frontend Review Queue page provides status/priority filters, per-row actions, inline notes, and bulk status changes.
+API: `GET /opportunities/review-queue` (filters: status, priority, state, min_score, max_score, service_type, source_id; optional `sort=priority`) and `PATCH /opportunities/{id}/review`. The frontend Review Queue page provides status/priority filters, per-row actions, inline notes, and bulk status changes.
+
+## Prioritization
+
+A **deterministic** priority score (no AI, no network) helps decide which bids to work first. Each opportunity gets a `priority_rank` (0-100) and a `priority_tier` (`High` >= 60, `Medium` >= 30, else `Low`), computed as a weighted blend of signals already on the row:
+
+- **Relevance** (~0-40): `relevance_decision` (`Relevant` full, `Maybe Relevant` half, otherwise low), scaled by `relevance_score` when present.
+- **Deadline urgency** (~0-30): from `due_date` vs now - closer deadlines score higher; past due = 0; a missing due date gets a small neutral credit.
+- **Fit** (~0-20): normalized `bid_score` (negatives clamped to 0).
+- **As-needed penalty** (-5) when `as_needed_warning` is set.
+- **Review-status gate**: `Do Not Pursue`/`Archived` force the rank very low; `Pursue` gets a small boost; `Watchlist` is neutral.
+
+The rank is clamped to `[0, 100]`. This is purely rules/heuristics - no Ollama, no cloud AI.
+
+```cmd
+cd backend
+python -m app.cli prioritize-all
+```
+
+API: `POST /opportunities/prioritize` -> `{"updated": N}`. The Review Queue requests `sort=priority` so the highest-priority rows show first, displays a **Priority** column (e.g. `High (72)`), and has a **Recompute priorities** button that runs the endpoint and reloads.
 
 ## Pursuit Workflow
 
