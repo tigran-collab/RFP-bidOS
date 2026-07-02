@@ -6,6 +6,7 @@ from app.routers import (
     dashboard,
     documents,
     exports,
+    notion,
     opportunities,
     portals,
     scraper,
@@ -30,6 +31,7 @@ app.include_router(sources.router)
 app.include_router(portals.router)
 app.include_router(dashboard.router)
 app.include_router(exports.router)
+app.include_router(notion.router)
 
 
 @app.get("/")

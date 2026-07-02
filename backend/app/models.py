@@ -150,6 +150,18 @@ class BidLogisticsQA(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class AppSetting(SQLModel, table=True):
+    """Generic key/value application settings store.
+
+    Holds small, non-secret configuration values (e.g. the Notion database id).
+    Secrets such as API tokens are NEVER stored here; those live only in the OS
+    keychain via credential_store.
+    """
+
+    key: str = Field(primary_key=True)
+    value: str | None = None
+
+
 class OpportunityEvaluation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     opportunity_id: int = Field(foreign_key="opportunity.id", index=True)

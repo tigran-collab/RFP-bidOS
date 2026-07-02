@@ -60,6 +60,7 @@ from app.services.source_credentials import (
     update_source_auth_status,
 )
 from app.services import credential_store
+from app.services import notion_connector
 from app.services.scrapers.portal_templates import get_template, list_templates
 
 cli = typer.Typer(help="RFP BidOS backend commands.")
@@ -2096,6 +2097,82 @@ def _echo_capabilities(caps: dict) -> None:
         f"authenticated scrape={'yes' if caps['supports_authenticated_scrape'] else 'not enabled'}"
     )
     typer.echo(f"  {caps['message']}")
+
+
+@cli.command("notion-configure")
+def notion_configure_command(
+    database_id: str = typer.Option(
+        ..., "--database-id", help="Notion database id (the Government Bid Tracker)"
+    ),
+) -> None:
+    """Store the Notion integration token (keychain) and database id (settings).
+
+    Prompts for the integration token without echoing it. The token is stored
+    ONLY in the OS keychain; the database id is stored in the app settings. The
+    token is never written to the database, printed, or logged.
+    """
+    init_db()
+    if not credential_store.is_available():
+        typer.echo(
+            "OS keychain (keyring) is not available. Install it with "
+            "`pip install keyring` and ensure your OS keychain is accessible.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # hide_input=True prevents the token from being echoed to the terminal.
+    token = typer.prompt("Notion integration token", hide_input=True)
+    with Session(engine) as session:
+        status = notion_connector.configure(
+            session, token=token, database_id=database_id
+        )
+    del token
+
+    if not status.get("configured"):
+        typer.echo(status.get("message", "Failed to configure Notion."), err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Notion configured. Token stored in the OS keychain (not the database).")
+    _echo_notion_status(status)
+
+
+@cli.command("notion-status")
+def notion_status_command() -> None:
+    """Print Notion configuration and connection status (never the token)."""
+    with Session(engine) as session:
+        status = notion_connector.notion_status(session)
+    _echo_notion_status(status)
+
+
+@cli.command("notion-sync")
+def notion_sync_command(
+    status: str = typer.Option(
+        None, "--status", help="Only sync opportunities with this review status"
+    ),
+    limit: int = typer.Option(200, "--limit", help="Max opportunities to sync"),
+) -> None:
+    """Sync opportunities to the configured Notion database (dedup by number/title)."""
+    with Session(engine) as session:
+        result = notion_connector.sync_opportunities(
+            session, status=status, limit=limit
+        )
+    if result.get("message"):
+        typer.echo(result["message"])
+    typer.echo(
+        f"created={result['created']}, updated={result['updated']}, "
+        f"skipped={result['skipped']}, errors={len(result['errors'])}"
+    )
+    for err in result["errors"]:
+        typer.echo(f"  error: {err}")
+
+
+def _echo_notion_status(status: dict) -> None:
+    typer.echo(f"Configured: {status.get('configured')}")
+    typer.echo(f"Database id: {status.get('database_id') or '-'}")
+    connection = status.get("connection_ok")
+    connection_label = "-" if connection is None else ("ok" if connection else "failed")
+    typer.echo(f"Connection: {connection_label}")
+    if status.get("message"):
+        typer.echo(status["message"])
 
 
 if __name__ == "__main__":

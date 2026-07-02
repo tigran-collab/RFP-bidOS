@@ -216,3 +216,20 @@ export function getLoginStatus(id) {
 export function setSourceEnabled(id, enabled) {
   return updateSource(id, { enabled });
 }
+
+// ---- Notion connector ----
+export function getNotionStatus() {
+  return request("/notion/status");
+}
+
+export function saveNotionConfig({ token, database_id }) {
+  return jsonRequest("/notion/config", { token, database_id }, "PUT");
+}
+
+export function deleteNotionConfig() {
+  return request("/notion/config", { method: "DELETE" });
+}
+
+export function syncNotion(body = {}) {
+  return jsonRequest("/notion/sync", body, "POST");
+}

@@ -728,6 +728,31 @@ python -m app.cli pursuit-prep-by-status --status Pursue --limit 5
 
 API: `POST /opportunities/{id}/pursuit-prep` (optional `{"steps": [...]}`) and `POST /opportunities/pursuit-prep/by-status` (`{"status": "Pursue", "limit": 10, "steps": [...]}`). The Review Queue and Opportunity Detail pages have a **Run Pursuit Prep** button.
 
+## Notion Connector
+
+The Notion connector syncs opportunities into your own Notion database (your "Government Bid Tracker") so triage/review data can live alongside the rest of your Notion workspace. Syncing **dedups by solicitation number** (matching the "Solicitation Number" property when present) or, failing that, **by title** — existing pages are updated in place (PATCH) rather than duplicated, and new opportunities create a new page.
+
+Only Notion properties that actually exist in your database schema are written, mapped case-insensitively by name: the database's title property ← title; `Agency`, `Due Date`, `Status`, `Priority`, `Relevance`, `Score`, `Solicitation Number`, `Source URL`. Properties whose type is unsupported or that don't exist are skipped, so the connector tolerates any database layout.
+
+**Security:** the Notion integration token is a secret and is stored **only in the OS keychain** (Windows Credential Manager / macOS Keychain / Secret Service) via the same credential store used for portal logins — never in the app database, git, or logs, and never returned by any endpoint. The (non-secret) database id is stored in a small `AppSetting` key/value table.
+
+Setup:
+
+1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy its token.
+2. Open your target database in Notion and share it with the integration (the "..." menu → Connections).
+3. Paste the token and database id in **Settings** in the web UI, or run `notion-configure` (below). The database id is the 32-character id in the database URL before `?v=`.
+
+CLI:
+
+```cmd
+cd backend
+python -m app.cli notion-configure --database-id <DATABASE_ID>   REM prompts for the token without echoing it
+python -m app.cli notion-status
+python -m app.cli notion-sync --status Pursue --limit 200
+```
+
+Endpoints: `GET /notion/status` (never returns the token), `PUT /notion/config` (`{"token": ..., "database_id": ...}`), `DELETE /notion/config`, and `POST /notion/sync` (optional `{"status": ..., "limit": ..., "opportunity_ids": [...]}`). Sync defaults to all non-`Archived` opportunities, bounded by `limit`. The **Settings** page has Save, Test connection, Sync, and Remove-configuration controls.
+
 ## Scope Notes
 
 This project currently avoids proposal drafting, OCR, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.
