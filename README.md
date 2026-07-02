@@ -216,6 +216,24 @@ If Ollama is off or the configured model is not installed, CLI/API/frontend surf
 When Ollama is running but `qwen3:8b` is missing, `ai-status` also prints:
 `Configured model is not installed. Run: ollama pull qwen3:8b`
 
+### AI Summary
+
+The app can generate a concise plain-language summary of an opportunity (and its
+parsed documents) to help triage bids. It uses local Ollama only (no cloud/OpenAI)
+and is **advisory** - always verify against the official solicitation documents.
+If Ollama or the model is unavailable, surfaces show the standard unavailable
+message and never crash.
+
+```cmd
+cd backend
+python -m app.cli ai-summarize-opportunity 1
+python -m app.cli ai-summarize-all --limit 25 --status new --force
+```
+
+- Endpoint: `POST /opportunities/{id}/ai-summary` (returns `{ok, summary, message}`;
+  the saved summary is also returned on the opportunity as `ai_summary` / `ai_summary_at`).
+- In-app: a "Generate AI Summary" button on the Opportunity Detail page.
+
 ## Local AI Chat
 
 The app includes a simple **Local AI Chat** page and an opportunity-aware chat panel on Opportunity Detail. Chat uses local Ollama only with the default model `qwen3:8b`; it does not use OpenAI APIs or cloud AI.

@@ -132,6 +132,10 @@ export function aiEvaluateOpportunity(id) {
   return request(`/opportunities/${id}/ai-evaluate`, { method: "POST" });
 }
 
+export function generateAiSummary(id) {
+  return request(`/opportunities/${id}/ai-summary`, { method: "POST" });
+}
+
 export function getOpportunityEvaluations(id) {
   return request(`/opportunities/${id}/evaluations`);
 }

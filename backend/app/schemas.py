@@ -32,6 +32,8 @@ class OpportunityCreate(BaseModel):
     ai_reason: str | None = None
     ai_risk_level: str | None = None
     ai_evaluated_at: datetime | None = None
+    ai_summary: str | None = None
+    ai_summary_at: datetime | None = None
     status: str = "new"
     review_status: str = "New"
     review_notes: str | None = None
@@ -186,6 +188,8 @@ class OpportunityUpdate(BaseModel):
     ai_reason: str | None = None
     ai_risk_level: str | None = None
     ai_evaluated_at: datetime | None = None
+    ai_summary: str | None = None
+    ai_summary_at: datetime | None = None
     status: str | None = None
     review_status: str | None = None
     review_notes: str | None = None

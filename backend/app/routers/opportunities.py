@@ -32,6 +32,7 @@ from app.services.ai_evaluator import (
     LOCAL_AI_UNAVAILABLE,
     evaluate_opportunity_with_local_ai,
 )
+from app.services.ai_summary import summarize_opportunity
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import parse_documents_for_opportunity
 from app.services.scraper import discover_documents_for_opportunity
@@ -314,6 +315,16 @@ def ai_evaluate_opportunity(opportunity_id: int) -> dict:
         if result.get("error") == LOCAL_AI_UNAVAILABLE:
             raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
         return result
+
+
+@router.post("/{opportunity_id}/ai-summary")
+def ai_summary_opportunity(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        return summarize_opportunity(opportunity_id, session)
 
 
 @router.get("/{opportunity_id}/evaluations", response_model=list[OpportunityEvaluationRead])

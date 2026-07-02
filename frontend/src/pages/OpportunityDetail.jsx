@@ -7,6 +7,7 @@ import {
   downloadOpportunityDocuments,
   extractOpportunityLogistics,
   extractOpportunityRequirements,
+  generateAiSummary,
   getLogisticsQA,
   getOpportunity,
   getOpportunityDocuments,
@@ -119,6 +120,8 @@ export default function OpportunityDetail({ opportunityId }) {
   const [downloading, setDownloading] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
+  const [aiSummarizing, setAiSummarizing] = useState(false);
+  const [aiSummaryNotice, setAiSummaryNotice] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [extractingLogistics, setExtractingLogistics] = useState(false);
   const [runningQA, setRunningQA] = useState(false);
@@ -380,6 +383,27 @@ export default function OpportunityDetail({ opportunityId }) {
     }
   }
 
+  async function runAiSummary() {
+    try {
+      setAiSummarizing(true);
+      setAiSummaryNotice("");
+      const result = await generateAiSummary(opportunityId);
+      if (result.ok) {
+        setOpportunity(await getOpportunity(opportunityId));
+        setActionMessage("Local AI summary updated.");
+        setActionError("");
+      } else {
+        setAiSummaryNotice(result.message || "Local AI summary is not available.");
+      }
+    } catch {
+      setAiSummaryNotice(
+        "Local AI model is not available. Start Ollama and make sure the model is installed."
+      );
+    } finally {
+      setAiSummarizing(false);
+    }
+  }
+
   async function runRequirementExtraction() {
     try {
       setExtracting(true);
@@ -410,6 +434,7 @@ export default function OpportunityDetail({ opportunityId }) {
     downloading ||
     parsing ||
     aiEvaluating ||
+    aiSummarizing ||
     extracting ||
     extractingLogistics ||
     runningQA;
@@ -656,6 +681,33 @@ export default function OpportunityDetail({ opportunityId }) {
           <DetailRow label="Checked at" value={formatDate(logisticsQA.checked_at)} />
         </dl>
       )}
+      <h2>AI Summary</h2>
+      <div className="pursuit-result">
+        <div className="page-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy}
+            onClick={runAiSummary}
+          >
+            {aiSummarizing ? "Generating..." : "Generate AI Summary"}
+          </button>
+        </div>
+        {aiSummaryNotice ? <p className="muted-text">{aiSummaryNotice}</p> : null}
+        {opportunity.ai_summary ? (
+          <>
+            <p style={{ whiteSpace: "pre-wrap" }}>{opportunity.ai_summary}</p>
+            <p className="muted-text">
+              Generated {formatDate(opportunity.ai_summary_at)}. Advisory only - verify
+              against the official solicitation documents.
+            </p>
+          </>
+        ) : (
+          !aiSummaryNotice && (
+            <p>No AI summary yet. Use Generate AI Summary (local Ollama only).</p>
+          )
+        )}
+      </div>
       <h2>Local AI Evaluation</h2>
       {!latestEvaluation ? (
         <p>No local AI evaluation found.</p>

@@ -11,6 +11,7 @@ from app.db import engine, init_db
 from app.models import Document, Opportunity, ScrapeRun, SourceConfig
 from app.schemas import OpportunityCreate, OpportunityUpdate
 from app.services.ai_evaluator import evaluate_opportunity_with_local_ai
+from app.services.ai_summary import summarize_opportunity
 from app.services.downloader import download_documents_for_opportunity
 from app.services.ollama_client import list_ollama_models
 from app.services.parser import (
@@ -1882,6 +1883,59 @@ def ai_evaluate_all_opportunities_command() -> None:
             typer.echo(f"AI score: {evaluation.score}")
             typer.echo(f"Risk level: {evaluation.risk_level}")
             typer.echo(f"Reason: {evaluation.reason}")
+
+
+@cli.command("ai-summarize-opportunity")
+def ai_summarize_opportunity_command(opportunity_id: int) -> None:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        result = summarize_opportunity(opportunity_id, session)
+        typer.echo(f"Title: {opportunity.title}")
+        if not result.get("ok"):
+            typer.echo(result.get("message", "Local AI summary unavailable."))
+            return
+
+        typer.echo("AI summary:")
+        typer.echo(result["summary"])
+
+
+@cli.command("ai-summarize-all")
+def ai_summarize_all_command(
+    limit: int = typer.Option(25, help="Maximum number of opportunities to summarize."),
+    status: str = typer.Option(None, help="Only summarize opportunities with this status."),
+    force: bool = typer.Option(False, help="Re-summarize even if a summary already exists."),
+) -> None:
+    with Session(engine) as session:
+        statement = select(Opportunity)
+        if status:
+            statement = statement.where(Opportunity.status == status)
+        opportunities = list(session.exec(statement).all())
+
+        processed = 0
+        for opportunity in opportunities:
+            if processed >= limit:
+                break
+            if opportunity.ai_summary and not force:
+                typer.echo(f"Skipping (already summarized): {opportunity.title}")
+                continue
+
+            processed += 1
+            try:
+                result = summarize_opportunity(opportunity.id, session)
+            except Exception as exc:  # noqa: BLE001 - continue past per-item errors
+                typer.echo(f"{opportunity.title}: error - {exc}")
+                continue
+
+            if not result.get("ok"):
+                typer.echo(f"{opportunity.title}: {result.get('message')}")
+                continue
+
+            typer.echo(f"Title: {opportunity.title}")
+            typer.echo(result["summary"])
 
 
 @cli.command("extract-requirements")

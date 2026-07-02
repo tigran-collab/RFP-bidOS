@@ -18,6 +18,7 @@ def init_db() -> None:
     if settings.database_url.startswith("sqlite:///"):
         _ensure_document_parser_columns()
         _ensure_opportunity_ai_columns()
+        _ensure_opportunity_summary_columns()
         _ensure_opportunity_review_columns()
         _ensure_opportunity_logistics_columns()
         _ensure_opportunity_relevance_columns()
@@ -51,6 +52,23 @@ def _ensure_opportunity_ai_columns() -> None:
         "ai_reason": "VARCHAR",
         "ai_risk_level": "VARCHAR",
         "ai_evaluated_at": "DATETIME",
+    }
+    with Session(engine) as session:
+        existing_columns = {
+            row[1] for row in session.exec(text("PRAGMA table_info(opportunity)")).all()
+        }
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                session.exec(
+                    text(f"ALTER TABLE opportunity ADD COLUMN {column_name} {column_type}")
+                )
+        session.commit()
+
+
+def _ensure_opportunity_summary_columns() -> None:
+    columns = {
+        "ai_summary": "VARCHAR",
+        "ai_summary_at": "DATETIME",
     }
     with Session(engine) as session:
         existing_columns = {
