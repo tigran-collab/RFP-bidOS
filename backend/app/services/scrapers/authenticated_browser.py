@@ -145,6 +145,9 @@ class AuthenticatedBrowserAdapter:
                 wait_selector=wait_selector,
                 timeout_seconds=self.timeout,
                 headless=fetch_headless,
+                search_keyword=config.get("search_keyword"),
+                search_input_selector=config.get("search_input_selector"),
+                search_submit_selector=config.get("search_submit_selector"),
             )
         except SessionExpiredError as exc:
             self.diagnostics.append(

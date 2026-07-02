@@ -340,6 +340,9 @@ def fetch_authenticated_html(
     wait_selector: str | None = None,
     timeout_seconds: int = 45,
     headless: bool = True,
+    search_keyword: str | None = None,
+    search_input_selector: str | None = None,
+    search_submit_selector: str | None = None,
 ) -> str:
     """Fetch the rendered HTML of ``page_url`` using the persisted profile, HEADLESSLY.
 
@@ -369,6 +372,25 @@ def fetch_authenticated_html(
             response = page.goto(page_url, timeout=timeout_ms)
             status = response.status if response is not None else None
             final_url = page.url
+
+            # Optional: run a keyword search before reading results. Some portals
+            # (e.g. BidNet) POST the search, so a plain GET shows only a default
+            # slice; typing a keyword and submitting is normal use of the page.
+            if search_keyword and search_input_selector:
+                try:
+                    page.fill(search_input_selector, search_keyword, timeout=timeout_ms)
+                    if search_submit_selector:
+                        page.click(search_submit_selector, timeout=timeout_ms)
+                    else:
+                        page.keyboard.press("Enter")
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+                    except Exception:
+                        pass
+                except Exception:
+                    # Search UI not present/changed — fall through to whatever
+                    # the page shows; parse degrades to [] if nothing matches.
+                    pass
 
             if wait_selector:
                 try:
