@@ -297,9 +297,13 @@ def _find_existing_opportunity(session: Session, candidate: ScraperResult, sourc
             return existing
 
     if candidate.solicitation_number:
+        # Solicitation numbers are only unique within one agency's portal, so
+        # scope the match to this source or two agencies reusing a number
+        # (e.g. "RFP-2026-01") would collapse into one record.
         existing = session.exec(
             select(Opportunity).where(
-                Opportunity.solicitation_number == candidate.solicitation_number
+                Opportunity.solicitation_number == candidate.solicitation_number,
+                Opportunity.source == getattr(source_config, "name", None),
             )
         ).first()
         if existing is not None:

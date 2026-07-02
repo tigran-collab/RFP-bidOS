@@ -17,6 +17,15 @@ _GENERIC_UNSUPPORTED_MSG = (
     "Authenticated scraping is not enabled in this phase."
 )
 _PUBLIC_MSG = "Public scraping is available for this source."
+_ASSISTED_LOGIN_MSG = (
+    "Authenticated scraping is supported via an assisted-login browser session."
+)
+
+# Source types whose adapters read data through a persisted, human-established
+# browser session. They self-gate on a missing/expired session, so they support
+# authenticated scraping even though they require credentials (mirrors
+# scraper._auth_skip_message).
+_ASSISTED_LOGIN_SOURCE_TYPES = ("planetbids", "authenticated_browser")
 
 _PORTAL_TYPE_HINTS = {
     "planetbids": "PlanetBids",
@@ -47,7 +56,9 @@ def get_source_scraper_capabilities(source_config) -> dict:
       source_id                    int
       portal_type                  str | None
       supports_public_scrape       bool
-      supports_authenticated_scrape bool  — always False in this phase
+      supports_authenticated_scrape bool  — True only for assisted-login
+                                     source types (planetbids,
+                                     authenticated_browser)
       requires_credentials         bool
       auth_status                  str | None
       message                      str
@@ -55,6 +66,18 @@ def get_source_scraper_capabilities(source_config) -> dict:
     portal_type = _infer_portal_type(source_config)
     requires_credentials = bool(source_config.requires_credentials)
     auth_status = source_config.auth_status
+
+    source_type = (source_config.source_type or "").lower()
+    if source_type in _ASSISTED_LOGIN_SOURCE_TYPES:
+        return {
+            "source_id": source_config.id,
+            "portal_type": portal_type,
+            "supports_public_scrape": False,
+            "supports_authenticated_scrape": True,
+            "requires_credentials": requires_credentials,
+            "auth_status": auth_status,
+            "message": _ASSISTED_LOGIN_MSG,
+        }
 
     if is_bidnet_source(source_config):
         adapter = BidNetPlaceholderAdapter()

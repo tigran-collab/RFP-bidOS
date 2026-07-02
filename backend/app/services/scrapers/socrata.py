@@ -35,12 +35,16 @@ gracefully rather than crashing the whole scrape.
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
 from app.services.scrapers.base import ScraperResult
-from app.services.scrapers.extraction_utils import normalize_space, parse_date
+from app.services.scrapers.extraction_utils import (
+    _is_plausible_bid_year,
+    normalize_space,
+    parse_date,
+)
 
 SOCRATA_USER_AGENT = "RFP-BidOS Public Scraper/0.2 (+socrata-open-data)"
 
@@ -274,7 +278,14 @@ def _parse_date(value: str | None) -> datetime | None:
         return None
     # Socrata floating timestamps look like 2026-05-28T00:00:00.000
     try:
-        return datetime.fromisoformat(value.replace("Z", ""))
+        parsed = datetime.fromisoformat(value.replace("Z", ""))
     except ValueError:
-        pass
-    return parse_date(value)
+        return parse_date(value)
+    if parsed.tzinfo is not None:
+        # Timestamps with a numeric offset parse as aware datetimes, which
+        # cannot be compared/sorted against the naive dates used everywhere
+        # else. Store naive UTC instead.
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    if not _is_plausible_bid_year(parsed.year):
+        return None
+    return parsed

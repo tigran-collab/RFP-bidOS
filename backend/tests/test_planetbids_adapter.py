@@ -6,6 +6,7 @@ degradation without launching a browser or hitting the network.
 """
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 from app.services.scrapers import browser_session, planetbids
@@ -157,6 +158,35 @@ def test_missing_cid_returns_empty(monkeypatch):
     results = adapter.scrape(make_source(config={"field_map": {"title": "title"}}))
     assert results == []
     assert any("cid" in d.lower() for d in adapter.diagnostics)
+
+
+def test_parse_date_numeric_offset_converted_to_naive_utc():
+    parsed = planetbids._parse_date("2026-08-15T17:00:00+02:00")
+    assert parsed == datetime(2026, 8, 15, 15, 0, 0)
+    assert parsed.tzinfo is None
+
+
+def test_parse_date_z_suffix_is_naive():
+    parsed = planetbids._parse_date("2026-08-15T17:00:00.000Z")
+    assert parsed == datetime(2026, 8, 15, 17, 0, 0)
+    assert parsed.tzinfo is None
+
+
+def test_bids_url_query_is_url_encoded(monkeypatch):
+    _force_playwright(monkeypatch)
+    captured = {}
+
+    def fake_fetch(api_url, profile_dir, timeout_seconds=45):
+        captured["api_url"] = api_url
+        return []
+
+    monkeypatch.setattr(planetbids, "fetch_authenticated_json", fake_fetch)
+    config = {**CONFIG, "params": {"per_page": 100, "search": "security guard & patrol"}}
+
+    PlanetBidsAuthAdapter().scrape(make_source(config=config))
+
+    assert "search=security+guard+%26+patrol" in captured["api_url"]
+    assert "cid=12345" in captured["api_url"]
 
 
 def test_check_auth_ready_reports_missing_pieces(monkeypatch, tmp_path):

@@ -23,7 +23,8 @@ def test_formula_like_titles_are_defused(session):
     session.add(Opportunity(title="-2-2", review_status="New"))
     session.commit()
 
-    rows = _rows(export_opportunities_csv(session))
+    content, _ = export_opportunities_csv(session)
+    rows = _rows(content)
     titles = sorted(r["title"] for r in rows)
 
     assert titles == sorted(
@@ -35,6 +36,7 @@ def test_normal_values_untouched(session):
     session.add(Opportunity(title="Security Guard Services", review_status="New"))
     session.commit()
 
-    rows = _rows(export_opportunities_csv(session))
+    content, _ = export_opportunities_csv(session)
+    rows = _rows(content)
 
     assert rows[0]["title"] == "Security Guard Services"

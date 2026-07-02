@@ -43,8 +43,9 @@ batch.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 from app.services.scrapers.base import ScraperResult
 from app.services.scrapers.browser_session import (
@@ -243,7 +244,9 @@ def _build_bids_url(config: dict, cid) -> str:
 
     params = {"cid": cid}
     params.update(config.get("params") or {})
-    query = "&".join(f"{key}={value}" for key, value in params.items() if value not in (None, ""))
+    query = urlencode(
+        {key: value for key, value in params.items() if value not in (None, "")}
+    )
     url = f"{api_base}{bids_path}"
     return f"{url}?{query}" if query else url
 
@@ -265,7 +268,11 @@ def _parse_date(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "").split(".")[0])
+        parsed = datetime.fromisoformat(value.replace("Z", "").split(".")[0])
     except ValueError:
-        pass
-    return parse_date(value)
+        return parse_date(value)
+    if parsed.tzinfo is not None:
+        # Numeric offsets parse as aware datetimes, which cannot be
+        # compared/sorted against the naive dates used everywhere else.
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed

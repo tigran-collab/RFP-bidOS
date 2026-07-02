@@ -6,12 +6,13 @@ network or depending on a live dataset.
 """
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 import requests
 
-from app.services.scrapers.socrata import SocrataAdapter
+from app.services.scrapers.socrata import SocrataAdapter, _parse_date
 
 CONFIG = {
     "domain": "citydata.mesaaz.gov",
@@ -220,6 +221,33 @@ def test_missing_required_config_raises(monkeypatch):
         assert False, "expected ValueError for missing dataset_id/title"
     except ValueError:
         pass
+
+
+# --- _parse_date: naive-UTC normalization and plausibility ------------------
+
+def test_parse_date_floating_timestamp_is_naive():
+    parsed = _parse_date("2026-07-15T00:00:00.000")
+    assert parsed == datetime(2026, 7, 15)
+    assert parsed.tzinfo is None
+
+
+def test_parse_date_numeric_offset_converted_to_naive_utc():
+    parsed = _parse_date("2026-07-15T10:00:00-07:00")
+    assert parsed == datetime(2026, 7, 15, 17, 0, 0)
+    assert parsed.tzinfo is None
+
+
+def test_parse_date_z_suffix_is_naive():
+    parsed = _parse_date("2026-07-15T00:00:00.000Z")
+    assert parsed is not None
+    assert parsed.tzinfo is None
+
+
+def test_parse_date_iso_fast_path_rejects_implausible_year():
+    # The plausibility window applies to ISO timestamps, not just the
+    # strptime fallback formats.
+    assert _parse_date("1970-01-15T00:00:00.000") is None
+    assert _parse_date("2099-01-15T00:00:00.000") is None
 
 
 # --- Pagination / retry / cap (Part A): these stub _fetch_page, not _fetch_rows ---

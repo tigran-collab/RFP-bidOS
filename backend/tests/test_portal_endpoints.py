@@ -147,6 +147,20 @@ def test_add_portal_unknown_template_is_422(portal_client):
     assert response.status_code == 422
 
 
+def test_add_portal_duplicate_name_is_409(portal_client):
+    first = portal_client.post(
+        "/sources/add-portal",
+        json={"template": "planetbids", "name": "Dup Agency Portal"},
+    )
+    assert first.status_code == 201
+    second = portal_client.post(
+        "/sources/add-portal",
+        json={"template": "planetbids", "name": "Dup Agency Portal"},
+    )
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # PUT credentials — stores in keychain, never returns the password
 # ---------------------------------------------------------------------------
@@ -208,7 +222,16 @@ def test_delete_credentials_clears_username_and_keychain(portal_client):
     assert not portal_client._fake_keyring.has_password(
         "rfp-bidos:test-portal", "vendor@example.com"
     )
-    assert response.json()["credential_username"] is None
+    body = response.json()
+    assert body["credential_username"] is None
+    # The dangling keychain reference is cleared too, so a later
+    # set-credentials starts from a clean slate.
+    assert body["credential_secret_ref"] is None
+    with Session(portal_client._engine) as db:
+        source = db.get(SourceConfig, source_id)
+        assert source.credential_secret_ref is None
+        assert source.requires_credentials is True
+        assert source.credential_type == "Keyring"
 
 
 # ---------------------------------------------------------------------------

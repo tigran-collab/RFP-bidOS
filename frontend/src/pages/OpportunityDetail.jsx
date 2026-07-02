@@ -160,9 +160,9 @@ export default function OpportunityDetail({ opportunityId }) {
           getLogisticsQA(opportunityId),
         ]);
         setOpportunity(opportunityResult);
-        setDocuments(documentsResult);
-        setEvaluations(evaluationsResult);
-        setRequirements(requirementsResult);
+        setDocuments(documentsResult ?? []);
+        setEvaluations(evaluationsResult ?? []);
+        setRequirements(requirementsResult ?? []);
         setLogisticsQA(qaResult && qaResult.qa_status ? qaResult : null);
         setError("");
       } catch {

@@ -53,6 +53,60 @@ def test_reseed_preserves_enabled_and_notes_but_updates_curated_fields(session):
     assert refreshed.config_json == entry["config_json"]
 
 
+def test_reseed_preserves_operator_tuned_config_json(session):
+    # Cal eProcure's curated entry ships no config_json; an operator-tuned
+    # config on the existing row must survive a reseed.
+    entry = _curated_entry("Cal eProcure (California State)")
+    assert entry.get("config_json") is None
+
+    tuned = '{"row_selector": ".bid-row", "list_url": "https://caleprocure.ca.gov/bids"}'
+    existing = SourceConfig(
+        name=entry["name"],
+        source_type="public_page",
+        base_url=entry["base_url"],
+        portal_type=entry["portal_type"],
+        state=entry["state"],
+        enabled=True,
+        notes="Operator tuned.",
+        config_json=tuned,
+    )
+    session.add(existing)
+    session.commit()
+
+    seed_real_sources(session)
+
+    refreshed = session.exec(
+        select(SourceConfig).where(SourceConfig.name == entry["name"])
+    ).first()
+    assert refreshed.config_json == tuned
+
+
+def test_reseed_still_propagates_curated_config_json(session):
+    # When the curated entry DOES provide a config_json, drifted stored
+    # configs are corrected on reseed.
+    entry = _curated_entry("City of Mesa, AZ - Purchasing Solicitations (Open Data)")
+    assert entry.get("config_json")
+
+    existing = SourceConfig(
+        name=entry["name"],
+        source_type=entry["source_type"],
+        base_url=entry["base_url"],
+        portal_type=entry["portal_type"],
+        state=entry["state"],
+        enabled=True,
+        config_json='{"stale": true}',
+    )
+    session.add(existing)
+    session.commit()
+
+    seed_real_sources(session)
+
+    refreshed = session.exec(
+        select(SourceConfig).where(SourceConfig.name == entry["name"])
+    ).first()
+    assert refreshed.config_json == entry["config_json"]
+
+
 def test_seed_new_row_sets_enabled_and_notes_from_curated(session):
     # With an empty DB, new rows must adopt the curated enabled/notes values.
     seed_real_sources(session)

@@ -4,13 +4,18 @@ The scorer reads attributes off an opportunity-like object via getattr, so a
 SimpleNamespace stands in for a real Opportunity row.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.services.scorer import (
+    _location_matches,
     apply_scored_review_status,
     score_opportunity_text,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def make_opp(**overrides):
@@ -47,7 +52,7 @@ def test_strong_security_opportunity_scores_bid():
         agency="Santa Clara County",
         location="San Jose, CA",
         description="BSIS licensed guard card required. Mobile patrol of multiple sites.",
-        due_date=datetime.utcnow() + timedelta(days=45),
+        due_date=_utc_now() + timedelta(days=45),
     )
     result = score_opportunity_text(opp)
     assert result["decision"] == "Bid"
@@ -70,7 +75,7 @@ def test_security_without_license_terms_flags_verification():
         title="Security Guard Services",
         location="Dallas, TX",
         description="Provide security officers for a public building.",
-        due_date=datetime.utcnow() + timedelta(days=30),
+        due_date=_utc_now() + timedelta(days=30),
     )
     result = score_opportunity_text(opp)
     assert any("BSIS" in v or "Guard Card" in v for v in result["verification_needed"])
@@ -93,7 +98,7 @@ def test_as_needed_without_offset_is_penalized():
         title="As-Needed Security Guard Services",
         location="Las Vegas, NV",
         description="On-call security officers, BSIS guard card required. No guaranteed minimum.",
-        due_date=datetime.utcnow() + timedelta(days=30),
+        due_date=_utc_now() + timedelta(days=30),
         as_needed_warning=True,
     )
     result = score_opportunity_text(opp)
@@ -105,7 +110,7 @@ def test_mandatory_pre_bid_missing_date_disqualifies():
         title="Security Guard Services",
         location="San Jose, CA",
         description="BSIS guard card required.",
-        due_date=datetime.utcnow() + timedelta(days=30),
+        due_date=_utc_now() + timedelta(days=30),
         pre_bid_mandatory=True,
         pre_bid_date=None,
     )
@@ -130,3 +135,32 @@ def test_apply_scored_review_status_fills_new():
     opp = make_opp(review_status="New")
     apply_scored_review_status(opp, "Needs Review")
     assert opp.review_status == "Needs Review"
+
+
+def test_location_matches_state_code_word_boundary():
+    assert _location_matches("Los Angeles, CA") is True
+    assert _location_matches("Carson City, NV") is True  # NV token, not " ca" substring
+    assert _location_matches("Carson City") is False
+    assert _location_matches("Cambridge, MA") is False
+
+
+def test_preferred_location_bonus_applied_for_ca():
+    opp = make_opp(
+        title="Security Guard Services",
+        description="BSIS guard card required.",
+        location="Los Angeles, CA",
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    result = score_opportunity_text(opp)
+    assert "Preferred operating location" in result["positive_factors"]
+
+
+def test_no_preferred_location_bonus_for_substring_false_positive():
+    opp = make_opp(
+        title="Security Guard Services",
+        description="BSIS guard card required.",
+        location="Cambridge, MA",
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    result = score_opportunity_text(opp)
+    assert "Preferred operating location" not in result["positive_factors"]

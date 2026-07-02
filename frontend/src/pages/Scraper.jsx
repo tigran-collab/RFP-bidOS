@@ -164,8 +164,8 @@ export default function Scraper() {
       const result = await scrapeSource(source.id);
       setMessage(`${source.name}: ${formatResult(result)}`);
       setError("");
-    } catch {
-      setError("Failed to scrape source.");
+    } catch (err) {
+      setError(err.message || "Failed to scrape source.");
     } finally {
       setScraping("");
     }
@@ -183,8 +183,8 @@ export default function Scraper() {
           `(of ${result.total_candidates_found} found)`,
       );
       setError("");
-    } catch {
-      setError("Failed to preview source.");
+    } catch (err) {
+      setError(err.message || "Failed to preview source.");
     } finally {
       setPreviewing("");
     }
@@ -196,8 +196,8 @@ export default function Scraper() {
       const result = await scrapeEnabledSources();
       setMessage(formatResult(result));
       setError("");
-    } catch {
-      setError("Failed to scrape enabled sources.");
+    } catch (err) {
+      setError(err.message || "Failed to scrape enabled sources.");
     } finally {
       setScraping("");
     }
@@ -224,8 +224,8 @@ export default function Scraper() {
       await loadSources();
       setMessage(`${source.name}: credential settings saved`);
       setError("");
-    } catch {
-      setError("Failed to save credential settings.");
+    } catch (err) {
+      setError(err.message || "Failed to save credential settings.");
     } finally {
       setSavingSource("");
     }
@@ -241,8 +241,8 @@ export default function Scraper() {
           `${result.skipped_existing} already present`,
       );
       setError("");
-    } catch {
-      setError("Failed to seed sources.");
+    } catch (err) {
+      setError(err.message || "Failed to seed sources.");
     } finally {
       setSeeding(false);
     }
@@ -265,8 +265,8 @@ export default function Scraper() {
       await loadSources();
       setMessage(`${source.name}: ${result.auth_status}`);
       setError("");
-    } catch {
-      setError("Failed to check auth status.");
+    } catch (err) {
+      setError(err.message || "Failed to check auth status.");
     } finally {
       setCheckingAuth("");
     }

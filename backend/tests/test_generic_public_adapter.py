@@ -8,6 +8,7 @@ from app.services.scraper import preview_source
 from app.services.scrapers.generic_public import (
     GenericPublicAdapter,
     NO_STATIC_RECORDS_DIAGNOSTIC,
+    _normalize_url,
 )
 from app.services.scrapers.keywords import score_candidate_relevance
 
@@ -177,6 +178,68 @@ def test_deduplication_and_relevance_still_work_for_real_detail_links():
     assert len(results) == 1
     relevance = score_candidate_relevance(results[0])
     assert relevance["relevance_decision"] == "Relevant"
+
+
+def _canned_response(body: bytes, content_type: str, url: str = BASE_URL):
+    response = requests.Response()
+    response.status_code = 200
+    response._content = body
+    response.headers["Content-Type"] = content_type
+    response.url = url
+    response.encoding = requests.utils.get_encoding_from_headers(response.headers)
+    return response
+
+
+def test_fetch_page_sniffs_encoding_when_header_has_no_charset(monkeypatch):
+    # requests defaults text/* without a charset to ISO-8859-1, which mojibakes
+    # UTF-8 pages; the adapter must sniff the apparent encoding instead.
+    body = "Sécurité — Request for Proposal".encode("utf-8")
+    monkeypatch.setattr(
+        "app.services.scrapers.generic_public.requests.get",
+        lambda url, headers=None, timeout=None: _canned_response(body, "text/html"),
+    )
+    adapter = GenericPublicAdapter()
+
+    html, _url = adapter._fetch_page(BASE_URL)
+
+    assert "Sécurité — Request for Proposal" in html
+
+
+def test_fetch_page_honors_declared_charset(monkeypatch):
+    body = "Café security services".encode("iso-8859-1")
+    monkeypatch.setattr(
+        "app.services.scrapers.generic_public.requests.get",
+        lambda url, headers=None, timeout=None: _canned_response(
+            body, "text/html; charset=iso-8859-1"
+        ),
+    )
+    adapter = GenericPublicAdapter()
+
+    html, _url = adapter._fetch_page(BASE_URL)
+
+    assert "Café security services" in html
+
+
+def test_normalize_url_returns_empty_for_malformed_port():
+    assert _normalize_url("http://example.com:80abc/") == ""
+
+
+def test_malformed_port_href_does_not_kill_the_scrape():
+    detail_url = "https://example.gov/solicitations/RFP-2026-50"
+    listing_html = """
+    <a href="https://example.gov:80abc/solicitations/RFP-2026-99">RFP-2026-99 Security Bid</a>
+    <a href="/solicitations/RFP-2026-50">RFP-2026-50 Security Guard Services</a>
+    """
+    detail_html = """
+    <h1>Security Guard Services</h1>
+    <p>Solicitation Number: RFP-2026-50</p>
+    <p>Due Date: 09/15/2026</p>
+    <p>Unarmed security guard services and patrol services.</p>
+    """
+    _adapter, results = _scrape({BASE_URL: listing_html, detail_url: detail_html})
+
+    assert len(results) == 1
+    assert results[0].detail_url == detail_url
 
 
 def test_preview_records_zero_candidate_diagnostic(monkeypatch):

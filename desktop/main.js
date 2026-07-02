@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -73,6 +73,20 @@ function createWindow() {
   });
   mainWindow = new BrowserWindow(windowOptions);
   mainWindow.setTitle(APP_TITLE);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(FRONTEND_URL) && !url.startsWith("file://")) {
+      event.preventDefault();
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        shell.openExternal(url);
+      }
+    }
+  });
   return mainWindow.loadFile(path.join(desktopDir, "status.html")).then(() => {
     sendStartupStatus({
       title: "Starting RFP BidOS",

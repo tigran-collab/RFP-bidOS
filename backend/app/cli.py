@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import typer
+from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -19,6 +20,7 @@ from app.services.parser import (
     parse_document,
     parse_documents_for_opportunity,
 )
+from app.services.local_chat_context import to_naive_utc
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import (
     discover_documents_for_opportunity,
@@ -732,12 +734,10 @@ def logistics_qa_by_status_command(
         _echo_logistics_qa(result)
 
 
-def _write_export(content: str, output: str) -> None:
+def _write_export(content: str, row_count: int, output: str) -> None:
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="")
-    # Row count excludes the header line.
-    row_count = max(0, content.count("\n") - 1) if content else 0
     typer.echo(f"Wrote {row_count} row(s) to {path}")
 
 
@@ -748,10 +748,10 @@ def export_opportunities_command(
     priority: str = typer.Option(None, "--priority"),
 ) -> None:
     with Session(engine) as session:
-        content = export_opportunities_csv(
+        content, row_count = export_opportunities_csv(
             session, filters={"review_status": review_status, "priority": priority}
         )
-    _write_export(content, output)
+    _write_export(content, row_count, output)
 
 
 @cli.command("export-requirements")
@@ -760,8 +760,8 @@ def export_requirements_command(
     opportunity_id: int = typer.Option(None, "--opportunity-id"),
 ) -> None:
     with Session(engine) as session:
-        content = export_requirements_csv(session, opportunity_id=opportunity_id)
-    _write_export(content, output)
+        content, row_count = export_requirements_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, row_count, output)
 
 
 @cli.command("export-documents")
@@ -770,8 +770,8 @@ def export_documents_command(
     opportunity_id: int = typer.Option(None, "--opportunity-id"),
 ) -> None:
     with Session(engine) as session:
-        content = export_documents_csv(session, opportunity_id=opportunity_id)
-    _write_export(content, output)
+        content, row_count = export_documents_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, row_count, output)
 
 
 @cli.command("export-logistics-qa")
@@ -780,8 +780,8 @@ def export_logistics_qa_command(
     opportunity_id: int = typer.Option(None, "--opportunity-id"),
 ) -> None:
     with Session(engine) as session:
-        content = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
-    _write_export(content, output)
+        content, row_count = export_logistics_qa_csv(session, opportunity_id=opportunity_id)
+    _write_export(content, row_count, output)
 
 
 @cli.command("export-deadlines")
@@ -939,9 +939,9 @@ def review_queue_command(
         key=lambda o: (
             REVIEW_STATUS_ORDER.get(o.review_status or "New", 2),
             0 if o.due_date else 1,
-            o.due_date or datetime.max,
+            to_naive_utc(o.due_date) if o.due_date else datetime.max,
             -(o.bid_score if o.bid_score is not None else -1e9),
-            -(o.created_at or datetime.min).timestamp(),
+            datetime.max - (to_naive_utc(o.created_at) if o.created_at else datetime.min),
         )
     )
 
@@ -965,6 +965,25 @@ def mark_opportunity_command(
     next_action: str = typer.Option(None, "--next-action", help="Next action"),
     reviewed_by: str = typer.Option(None, "--reviewed-by", help="Reviewer name"),
 ) -> None:
+    # Validate choice fields through the schema so an invalid value never
+    # reaches the database (invalid rows break every opportunity read).
+    choices = {
+        key: value
+        for key, value in {
+            "review_status": status,
+            "priority": priority,
+            "next_action": next_action,
+        }.items()
+        if value is not None
+    }
+    if choices:
+        try:
+            OpportunityUpdate(**choices)
+        except ValidationError as exc:
+            for error in exc.errors():
+                typer.echo(error["msg"], err=True)
+            raise typer.Exit(code=1)
+
     with Session(engine) as session:
         opportunity = session.get(Opportunity, opportunity_id)
         if opportunity is None:
@@ -1396,6 +1415,10 @@ def add_portal_source(
     existing = session.exec(
         select(SourceConfig).where(SourceConfig.name == name)
     ).first()
+    if existing is not None:
+        raise ValueError(
+            f"A source named '{name}' already exists (id={existing.id})."
+        )
 
     config_json: str | None = None
     if template:
@@ -1452,12 +1475,6 @@ def add_portal_source(
         "name": source.name,
         "source_type": source.source_type,
         "credential_secret_ref": source.credential_secret_ref,
-        "existing_warning": (
-            f"A source named '{name}' already exists (id={existing.id}); "
-            "created another. Consider removing the duplicate."
-            if existing is not None
-            else None
-        ),
     }
 
 
@@ -1509,8 +1526,6 @@ def add_portal_command(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1)
 
-    if result["existing_warning"]:
-        typer.echo(f"WARNING: {result['existing_warning']}")
     source_id = result["source_id"]
     typer.echo(
         f"Created disabled portal source [{source_id}] {result['name']} "

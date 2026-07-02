@@ -71,7 +71,13 @@ def scrape_enabled_sources() -> dict:
         )
 
     for source in sources:
-        result = _run_scrape_for_source(source)
+        try:
+            result = _run_scrape_for_source(source)
+        except Exception as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            summary["errors"].append(f"{source.name}: {detail}")
+            summary["results"].append({"source": source.name, "error": detail})
+            continue
         summary["sources_scraped"] += 1
         summary["records_found"] += result["records_found"]
         summary["candidates_found"] += result.get("total_candidates_found", 0)

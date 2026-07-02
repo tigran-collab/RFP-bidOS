@@ -3,7 +3,7 @@
 Uses the in-memory `session` fixture so no real data is touched.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.models import Opportunity
 from app.services.local_chat_context import (
@@ -23,7 +23,7 @@ def _seed(session, n=3):
                 title=f"Security Guard Services {i}",
                 agency="County",
                 location="San Jose, CA",
-                due_date=datetime.utcnow() + timedelta(days=10 + i),
+                due_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=10 + i),
                 review_status="New",
             )
         )

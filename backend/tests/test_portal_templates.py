@@ -120,12 +120,13 @@ def test_add_portal_explicit_requires_source_type_and_login(session):
         add_portal_source(session, name="Y", source_type="authenticated_browser")
 
 
-def test_add_portal_warns_on_duplicate_name(session):
+def test_add_portal_rejects_duplicate_name(session):
     add_portal_source(session, name="Dup Portal", template="generic")
-    result = add_portal_source(session, name="Dup Portal", template="generic")
-    assert result["existing_warning"] is not None
-    # Both were created (add-portal is idempotent-ish: warns, does not block).
+    with pytest.raises(ValueError, match="already exists"):
+        add_portal_source(session, name="Dup Portal", template="generic")
+    # Only the first source exists; duplicates would share one keyring ref and
+    # silently collide on credentials.
     sources = list(
         session.exec(select(SourceConfig).where(SourceConfig.name == "Dup Portal")).all()
     )
-    assert len(sources) == 2
+    assert len(sources) == 1

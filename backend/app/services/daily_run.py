@@ -68,7 +68,10 @@ def _scrape_enabled_sources(session) -> dict:
 
 def _score_all(session) -> int:
     opportunities = list(session.exec(select(Opportunity)).all())
+    scored = 0
     for opportunity in opportunities:
+        if opportunity.review_status == "Archived":
+            continue
         scoring_result = score_opportunity_text(opportunity)
         opportunity.bid_score = scoring_result["score"]
         opportunity.bid_decision = scoring_result["decision"]
@@ -76,8 +79,9 @@ def _score_all(session) -> int:
         apply_scored_review_status(opportunity, scoring_result["suggested_review_status"])
         opportunity.updated_at = _utc_now()
         session.add(opportunity)
+        scored += 1
     session.commit()
-    return len(opportunities)
+    return scored
 
 
 def daily_run(session, do_scrape: bool = True, days: int = 7) -> dict:

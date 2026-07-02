@@ -13,7 +13,11 @@ touches the network at import time. Parsing is defensive (``.get()`` everywhere)
 because the catalog/probe response shapes vary by domain and version.
 """
 
+import ipaddress
 import json
+import re
+import socket
+from urllib.parse import urlsplit
 
 import requests
 
@@ -142,6 +146,61 @@ def _is_gov_domain(domain: str) -> bool:
     return any(hint in lowered for hint in GOV_DOMAIN_HINTS)
 
 
+# Socrata dataset ids are always "4x4" identifiers (e.g. "dfcn-ivuc").
+_DATASET_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
+
+_UNSAFE_PROBE_ERROR = "unsafe domain or dataset id; probe skipped"
+
+
+def _is_safe_probe_target(domain: str, dataset_id: str) -> bool:
+    """True when a catalog-supplied (domain, dataset_id) pair is safe to probe.
+
+    Both values come from an untrusted catalog response and are interpolated
+    into the probe URL, so they must not smuggle userinfo, ports, or path
+    segments, and the host must not resolve to internal address space. The
+    getaddrinfo pre-check does not fully defeat DNS rebinding (the probe
+    request resolves the name again); it only blocks direct SSRF targets.
+    """
+    if not _DATASET_ID_RE.fullmatch(dataset_id or ""):
+        return False
+    if not domain:
+        return False
+    try:
+        parsed = urlsplit(f"https://{domain}")
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.hostname != domain.lower()
+    ):
+        return False
+    try:
+        resolved = socket.getaddrinfo(domain, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    if not resolved:
+        return False
+    for _family, _type, _proto, _canonname, sockaddr in resolved:
+        try:
+            address = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            return False
+    return True
+
+
 def _columns_from_rows(rows) -> list[str]:
     """Collect the union of column names from a list of sample rows."""
     columns: list[str] = []
@@ -198,7 +257,7 @@ def suggest_field_map(columns) -> dict:
     if title:
         field_map["title"] = title
 
-    solicitation = first_matching("solicitation", "bid_no", "no", "number", "id")
+    solicitation = first_matching("solicitation", "bid_no", "contract_no", "number", "id")
     if solicitation:
         field_map["solicitation_number"] = solicitation
 
@@ -287,6 +346,9 @@ def discover_socrata_sources(
 
     if probe:
         for candidate in candidates:
+            if not _is_safe_probe_target(candidate["domain"], candidate["dataset_id"]):
+                candidate["probe_error"] = _UNSAFE_PROBE_ERROR
+                continue
             try:
                 probe_url = (
                     f"https://{candidate['domain']}/resource/"

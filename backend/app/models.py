@@ -1,6 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Field, SQLModel
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class OpportunityBase(SQLModel):
@@ -57,8 +61,8 @@ class Opportunity(SQLModel, table=True):
     relevance_reason: str | None = None
     priority_rank: float | None = None
     priority_tier: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class Document(SQLModel, table=True):
@@ -90,8 +94,8 @@ class Requirement(SQLModel, table=True):
     due_date: datetime | None = None
     assigned_response_section: str | None = None
     notes: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
     extractor_type: str | None = None
     response_location: str | None = None
     evidence_needed: str | None = None
@@ -121,14 +125,14 @@ class SourceConfig(SQLModel, table=True):
     last_scrape_at: datetime | None = None
     last_scrape_status: str | None = None
     last_scrape_summary: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class ScrapeRun(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     source_name: str
     source_id: int | None = Field(default=None, index=True)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow_naive)
     finished_at: datetime | None = None
     status: str = "pending"
     records_found: int = 0
@@ -146,8 +150,8 @@ class BidLogisticsQA(SQLModel, table=True):
     summary: str | None = None
     issues_json: str | None = None
     recommended_actions_json: str | None = None
-    checked_at: datetime = Field(default_factory=datetime.utcnow)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    checked_at: datetime = Field(default_factory=utcnow_naive)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class AppSetting(SQLModel, table=True):
@@ -178,4 +182,4 @@ class OpportunityEvaluation(SQLModel, table=True):
     questions_to_verify_json: str | None = None
     recommended_next_action: str | None = None
     raw_response: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)

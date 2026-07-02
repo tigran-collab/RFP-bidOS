@@ -15,27 +15,6 @@ MAX_DOCUMENT_SNIPPETS = 3
 MAX_DOCUMENT_SNIPPET_CHARS = 1000
 MAX_CONTEXT_CHARS = 16000
 
-AUTO_APP_TERMS = (
-    "all opportunities",
-    "currently",
-    "presently",
-    "right now",
-    "top opportunities",
-    "best security",
-    "best pursuits",
-    "what should i work on",
-    "work on next",
-    "no-bid",
-    "no bid",
-    "pursue",
-    "watchlist",
-    "as-needed",
-    "as needed",
-    "risky",
-    "missing deadlines",
-    "document review",
-    "mandatory pre-bid",
-)
 AUTO_DEADLINE_TERMS = ("due soon", "deadlines", "coming up", "missing deadline")
 AUTO_PURSUIT_TERMS = (
     "worth pursuing",
@@ -279,8 +258,6 @@ def infer_context_mode(message: str, context_request: dict | None = None) -> str
         return "deadlines"
     if any(term in text for term in AUTO_PURSUIT_TERMS):
         return "pursuit"
-    if any(term in text for term in AUTO_APP_TERMS):
-        return "app_overview"
     return "app_overview"
 
 

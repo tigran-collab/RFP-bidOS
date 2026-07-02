@@ -109,6 +109,9 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
         summary["documents"].append(existing_by_hash)
         if existing_by_hash.path != str(path):
             path.unlink(missing_ok=True)
+        if existing_by_url is not None and existing_by_url.id != existing_by_hash.id:
+            session.delete(existing_by_url)
+            session.commit()
         return summary
 
     document = existing_by_url or Document(

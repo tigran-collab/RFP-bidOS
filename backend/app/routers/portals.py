@@ -134,7 +134,8 @@ def add_portal(payload: AddPortalRequest) -> SourceConfig:
                 list_url=payload.list_url,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            status_code = 409 if "already exists" in str(exc) else 422
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
         source = session.get(SourceConfig, result["source_id"])
         if source is None:  # pragma: no cover - defensive
@@ -206,6 +207,7 @@ def delete_source_credentials(source_id: int) -> dict:
             credential_store.delete_password(ref, username)
 
         source.credential_username = None
+        source.credential_secret_ref = None
         status = get_source_auth_status(source)
         source.auth_status = status["auth_status"]
         source.auth_last_checked_at = _utc_now()

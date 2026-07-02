@@ -161,7 +161,10 @@ def load_extracted_text_for_requirements(
         path = Path(document.extracted_text_path)
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         snippet = text[:remaining]
         remaining -= len(snippet)
         snippets.append(
@@ -176,6 +179,13 @@ def load_extracted_text_for_requirements(
 
 
 def extract_requirements_with_local_ai(opportunity_id: int, session) -> dict:
+    outcome = _run_local_ai_extraction(opportunity_id, session)
+    if "extraction_result" not in outcome:
+        return outcome
+    return _save_and_summarize(opportunity_id, outcome["extraction_result"], session)
+
+
+def _run_local_ai_extraction(opportunity_id: int, session) -> dict:
     opportunity = session.get(Opportunity, opportunity_id)
     if opportunity is None:
         return {"error": "Opportunity not found"}
@@ -210,6 +220,10 @@ def extract_requirements_with_local_ai(opportunity_id: int, session) -> dict:
     except (ValueError, TypeError, json.JSONDecodeError):
         return {"error": INVALID_JSON, "raw_response": raw_response}
 
+    return {"extraction_result": extraction_result}
+
+
+def _save_and_summarize(opportunity_id: int, extraction_result: dict, session) -> dict:
     saved = save_extracted_requirements(opportunity_id, extraction_result, session)
     return {
         "summary": extraction_result["summary"],
@@ -277,6 +291,9 @@ def parse_requirements_json_response(response_text: str) -> dict:
 
 
 def refresh_requirements_with_local_ai(opportunity_id: int, session) -> dict:
+    outcome = _run_local_ai_extraction(opportunity_id, session)
+    if "extraction_result" not in outcome:
+        return outcome
     existing = list(
         session.exec(
             select(Requirement).where(
@@ -287,8 +304,7 @@ def refresh_requirements_with_local_ai(opportunity_id: int, session) -> dict:
     )
     for requirement in existing:
         session.delete(requirement)
-    session.commit()
-    return extract_requirements_with_local_ai(opportunity_id, session)
+    return _save_and_summarize(opportunity_id, outcome["extraction_result"], session)
 
 
 def _normalize_requirement_type(value: Any) -> str:
@@ -314,9 +330,12 @@ def _parse_datetime_or_none(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
 
 
 def _none_or_str(value: Any) -> str | None:

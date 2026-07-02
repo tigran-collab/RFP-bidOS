@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,7 +29,8 @@ SPECIALTY_SECURITY_TERMS = (
     "hospital",
     "medical center",
 )
-PREFERRED_LOCATIONS = (" ca", "california", " tx", "texas", " nv", "nevada", " az", "arizona")
+PREFERRED_STATE_CODES = ("ca", "tx", "nv", "az")
+PREFERRED_STATE_NAMES = ("california", "texas", "nevada", "arizona")
 LICENSE_TERMS = ("bsis", "ppo", "private patrol operator", "guard card")
 AS_NEEDED_TERMS = (
     *AS_NEEDED_WARNING_KEYWORDS,
@@ -125,10 +127,7 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         negative_factors.append("Required license not held or unclear")
         verification_needed.append("Verify BSIS/PPO/Guard Card requirements")
 
-    if security_match and _has_any(text, ("guard owl", "guardowl", "guard management", "mobile patrol")):
-        score += 10
-        positive_factors.append("Guard Owl fit")
-    elif security_match:
+    if security_match:
         score += 10
         positive_factors.append("Guard Owl fit")
 
@@ -235,13 +234,17 @@ def _has_any(text: str, terms: tuple[str, ...]) -> bool:
 def _location_matches(location: Any) -> bool:
     if not location:
         return False
-    location_text = f" {str(location).lower()} "
-    return any(term in location_text for term in PREFERRED_LOCATIONS)
+    location_text = str(location).lower()
+    if any(name in location_text for name in PREFERRED_STATE_NAMES):
+        return True
+    return any(
+        re.search(rf"\b{code}\b", location_text) for code in PREFERRED_STATE_CODES
+    )
 
 
 def _days_until(value: datetime) -> int:
     if value.tzinfo is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         delta = value - now
     else:
         now = datetime.now(timezone.utc)

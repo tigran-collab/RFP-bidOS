@@ -133,7 +133,7 @@ def _write_csv(columns: list[str], rows: list[dict]) -> str:
     return buffer.getvalue()
 
 
-def export_opportunities_csv(session, filters: dict | None = None) -> str:
+def export_opportunities_csv(session, filters: dict | None = None) -> tuple[str, int]:
     filters = filters or {}
     opportunities = list(session.exec(select(Opportunity).order_by(Opportunity.id)).all())
 
@@ -147,7 +147,7 @@ def export_opportunities_csv(session, filters: dict | None = None) -> str:
         opportunities = [o for o in opportunities if (o.priority or "") == priority]
 
     rows = [{name: _value(o, name) for name in OPPORTUNITY_COLUMNS} for o in opportunities]
-    return _write_csv(OPPORTUNITY_COLUMNS, rows)
+    return _write_csv(OPPORTUNITY_COLUMNS, rows), len(rows)
 
 
 def _opportunity_titles(session) -> dict[int, str]:
@@ -156,7 +156,7 @@ def _opportunity_titles(session) -> dict[int, str]:
     }
 
 
-def export_requirements_csv(session, opportunity_id: int | None = None) -> str:
+def export_requirements_csv(session, opportunity_id: int | None = None) -> tuple[str, int]:
     statement = select(Requirement)
     if opportunity_id is not None:
         statement = statement.where(Requirement.opportunity_id == opportunity_id)
@@ -182,10 +182,10 @@ def export_requirements_csv(session, opportunity_id: int | None = None) -> str:
                 "notes": _value(req, "notes"),
             }
         )
-    return _write_csv(REQUIREMENT_COLUMNS, rows)
+    return _write_csv(REQUIREMENT_COLUMNS, rows), len(rows)
 
 
-def export_documents_csv(session, opportunity_id: int | None = None) -> str:
+def export_documents_csv(session, opportunity_id: int | None = None) -> tuple[str, int]:
     statement = select(Document)
     if opportunity_id is not None:
         statement = statement.where(Document.opportunity_id == opportunity_id)
@@ -210,10 +210,10 @@ def export_documents_csv(session, opportunity_id: int | None = None) -> str:
                 "created_at": created,
             }
         )
-    return _write_csv(DOCUMENT_COLUMNS, rows)
+    return _write_csv(DOCUMENT_COLUMNS, rows), len(rows)
 
 
-def export_logistics_qa_csv(session, opportunity_id: int | None = None) -> str:
+def export_logistics_qa_csv(session, opportunity_id: int | None = None) -> tuple[str, int]:
     statement = select(BidLogisticsQA)
     if opportunity_id is not None:
         statement = statement.where(BidLogisticsQA.opportunity_id == opportunity_id)
@@ -236,7 +236,7 @@ def export_logistics_qa_csv(session, opportunity_id: int | None = None) -> str:
                 "created_at": _value(qa, "created_at"),
             }
         )
-    return _write_csv(LOGISTICS_QA_COLUMNS, rows)
+    return _write_csv(LOGISTICS_QA_COLUMNS, rows), len(rows)
 
 
 def _ics_escape(value) -> str:

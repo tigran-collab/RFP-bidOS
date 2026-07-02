@@ -6,17 +6,34 @@ verified without any network access.
 """
 
 import json
+import socket
 
+import pytest
 from sqlmodel import select
 
 from app.models import SourceConfig
 from app.services.scrapers.socrata_discovery import (
     _is_procurement,
+    _is_safe_probe_target,
     discover_socrata_sources,
     infer_states,
     seed_discovered_sources,
     suggest_field_map,
 )
+
+PUBLIC_ADDRINFO = [
+    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+]
+
+
+def _addrinfo_for(ip: str):
+    return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, 443))]
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Keep discovery tests offline: pretend every probed host resolves publicly."""
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: PUBLIC_ADDRINFO)
 
 
 def test_infer_states_maps_domains():
@@ -222,6 +239,74 @@ def test_seeding_creates_disabled_source_and_is_idempotent(session):
         ).all()
     )
     assert len(rows) == 1
+
+
+# --- Probe SSRF hardening ----------------------------------------------------
+def test_is_safe_probe_target_accepts_public_host():
+    assert _is_safe_probe_target("citydata.mesaaz.gov", "proc-1111") is True
+
+
+def test_is_safe_probe_target_rejects_private_loopback_and_linklocal(monkeypatch):
+    for ip in ("127.0.0.1", "10.0.0.5", "192.168.1.10", "169.254.169.254"):
+        monkeypatch.setattr(
+            socket, "getaddrinfo", lambda *a, _ip=ip, **k: _addrinfo_for(_ip)
+        )
+        assert _is_safe_probe_target("citydata.mesaaz.gov", "proc-1111") is False
+
+
+def test_is_safe_probe_target_rejects_unresolvable_host(monkeypatch):
+    def raise_gaierror(*args, **kwargs):
+        raise socket.gaierror("name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", raise_gaierror)
+    assert _is_safe_probe_target("citydata.mesaaz.gov", "proc-1111") is False
+
+
+def test_is_safe_probe_target_rejects_port_userinfo_and_path_smuggling():
+    assert _is_safe_probe_target("citydata.mesaaz.gov:8443", "proc-1111") is False
+    assert _is_safe_probe_target("citydata.mesaaz.gov:80abc", "proc-1111") is False
+    assert _is_safe_probe_target("user:pass@citydata.mesaaz.gov", "proc-1111") is False
+    assert _is_safe_probe_target("evil.example@citydata.mesaaz.gov", "proc-1111") is False
+    assert _is_safe_probe_target("citydata.mesaaz.gov/evil", "proc-1111") is False
+
+
+def test_is_safe_probe_target_rejects_malformed_dataset_id():
+    for bad in ("proc-1111/../../admin", "PROC-1111", "proc_1111", "abcde-1234", ""):
+        assert _is_safe_probe_target("citydata.mesaaz.gov", bad) is False
+
+
+def test_unsafe_candidates_are_skipped_without_probing():
+    catalog = {
+        "results": [
+            {
+                # Port smuggled into the domain.
+                "resource": {"id": "proc-1111", "name": "Open Bids", "description": ""},
+                "metadata": {"domain": "citydata.mesaaz.gov:8443"},
+            },
+            {
+                # Path smuggled into the dataset id.
+                "resource": {"id": "xxxx-1111/../../admin", "name": "Open Bids", "description": ""},
+                "metadata": {"domain": "citydata.mesaaz.gov"},
+            },
+        ]
+    }
+    probed: list[str] = []
+
+    def http_get(url, params=None, timeout=None):
+        if url.endswith("/catalog/v1"):
+            return FakeResponse(catalog)
+        probed.append(url)
+        return FakeResponse([])
+
+    candidates = discover_socrata_sources(queries=["bids"], probe=True, http_get=http_get)
+
+    assert probed == []
+    assert len(candidates) == 2
+    assert all(
+        c["probe_error"] == "unsafe domain or dataset id; probe skipped"
+        for c in candidates
+    )
+    assert all(c["is_procurement"] is False for c in candidates)
 
 
 # --- Fix 6: required title + status_field placement -------------------------

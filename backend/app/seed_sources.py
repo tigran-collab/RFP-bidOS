@@ -301,7 +301,8 @@ def seed_real_sources(session: Session) -> dict:
     source type, and config JSON so corrections propagate on reseed. The
     operator-managed "enabled" flag and "notes" are intentionally left
     untouched on existing rows; only newly created rows get them from the
-    curated entry.
+    curated entry. An existing config_json is preserved when the curated entry
+    does not provide one, so operator-tuned configs survive reseeding.
     """
     created = 0
     updated = 0
@@ -326,6 +327,10 @@ def seed_real_sources(session: Session) -> dict:
                 "config_json",
             ):
                 desired = entry.get(field, "public_page" if field == "source_type" else None)
+                # Never clobber an operator-tuned config with an empty curated
+                # one; only overwrite when the curated entry provides a config.
+                if field == "config_json" and desired is None and existing.config_json:
+                    continue
                 if getattr(existing, field) != desired:
                     setattr(existing, field, desired)
                     changed = True

@@ -225,6 +225,11 @@ class GenericPublicAdapter:
             timeout=self.timeout,
         )
         response.raise_for_status()
+        # Without a charset in the Content-Type header requests decodes text/*
+        # as ISO-8859-1, mojibaking UTF-8 pages; sniff the real encoding then.
+        content_type = response.headers.get("Content-Type") or ""
+        if response.encoding is None or "charset" not in content_type.lower():
+            response.encoding = response.apparent_encoding
         return response.text, response.url
 
     def _candidate_detail_links(
@@ -241,7 +246,8 @@ class GenericPublicAdapter:
             url = _defrag_url(urljoin(base_url, href))
             normalized = _normalize_url(url)
             if (
-                normalized in seen
+                not normalized
+                or normalized in seen
                 or normalized in (listing_urls or set())
                 or is_document_url(url)
                 or _is_navigation_link(title, url)
@@ -484,14 +490,19 @@ def _has_bounded_record_evidence(candidate: ScraperResult) -> bool:
 def _normalize_url(url: str | None) -> str:
     if not url:
         return ""
-    url, _fragment = urldefrag(url.strip())
-    parsed = urlparse(url)
+    try:
+        url, _fragment = urldefrag(url.strip())
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        # Malformed authority (e.g. a non-numeric port) — treat as no URL.
+        return ""
     scheme = (parsed.scheme or "").lower()
     host = (parsed.hostname or "").lower()
-    if parsed.port and not (
-        (scheme == "http" and parsed.port == 80) or (scheme == "https" and parsed.port == 443)
+    if port and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
     ):
-        host = f"{host}:{parsed.port}"
+        host = f"{host}:{port}"
     path = re.sub(r"/+", "/", parsed.path or "/")
     if path != "/":
         path = path.rstrip("/")

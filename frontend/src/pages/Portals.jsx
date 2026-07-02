@@ -137,14 +137,15 @@ export default function Portals() {
 
   async function handleSaveCredentials(source) {
     const entry = creds[source.id] || {};
-    if (!entry.username || !entry.password) {
+    const username = entry.username || source.credential_username || "";
+    if (!username || !entry.password) {
       setRowMessage((c) => ({ ...c, [source.id]: "Enter a username and password." }));
       return;
     }
     try {
       setRowBusy(source.id, "saving");
       await setSourceCredentials(source.id, {
-        username: entry.username,
+        username,
         password: entry.password,
       });
       // Clear the password field immediately; never keep it in state.
@@ -196,9 +197,20 @@ export default function Portals() {
         setRowBusy(source.id, "");
         return;
       }
-      // Poll login-status every ~2s until it settles.
+      // Poll login-status every ~2s until it settles (or 5 minutes pass).
       stopPolling(source.id);
+      const pollDeadline = Date.now() + 5 * 60 * 1000;
       pollers.current[source.id] = setInterval(async () => {
+        if (Date.now() > pollDeadline) {
+          stopPolling(source.id);
+          setRowBusy(source.id, "");
+          setRowMessage((c) => ({
+            ...c,
+            [source.id]:
+              "Login timed out. Close the browser window and try again.",
+          }));
+          return;
+        }
         const latest = await refreshLoginStatus(source.id);
         if (!latest) return;
         if (["success", "expired", "failed"].includes(latest.state)) {

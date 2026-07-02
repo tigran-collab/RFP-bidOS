@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   aiEvaluateOpportunity,
@@ -42,6 +42,8 @@ function formatDate(value) {
 export default function ReviewQueue({ onOpenOpportunity }) {
   const [opportunities, setOpportunities] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [deadlineRiskFilter, setDeadlineRiskFilter] = useState("");
@@ -53,8 +55,11 @@ export default function ReviewQueue({ onOpenOpportunity }) {
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const requestSeq = useRef(0);
+  const dirtyNotes = useRef(new Set());
 
   const loadQueue = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       setLoading(true);
       const result = await getReviewQueue({
@@ -65,15 +70,30 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         sort: sortField,
         direction: sortDirection,
       });
+      if (seq !== requestSeq.current) {
+        return;
+      }
       setOpportunities(result);
-      setNotesDraft(
-        Object.fromEntries(result.map((o) => [o.id, o.review_notes || ""])),
+      setNotesDraft((current) =>
+        Object.fromEntries(
+          result.map((o) => [
+            o.id,
+            dirtyNotes.current.has(o.id)
+              ? current[o.id] ?? o.review_notes ?? ""
+              : o.review_notes || "",
+          ]),
+        ),
       );
       setError("");
     } catch {
-      setError(errorMessage);
+      if (seq === requestSeq.current) {
+        setError(errorMessage);
+      }
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+        setInitialized(true);
+      }
     }
   }, [statusFilter, priorityFilter, deadlineRiskFilter, qaRiskFilter, sortField, sortDirection]);
 
@@ -88,8 +108,10 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       setMessage(`Opportunity ${id}: ${label}`);
       setError("");
       await loadQueue();
+      return true;
     } catch {
       setError(`Failed to update opportunity ${id}.`);
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -158,10 +180,11 @@ export default function ReviewQueue({ onOpenOpportunity }) {
 
   async function bulkMark(status) {
     const ids = [...selected];
-    if (!ids.length) {
+    if (!ids.length || bulkBusy) {
       return;
     }
     try {
+      setBulkBusy(true);
       setMessage(`Marking ${ids.length} as ${status}...`);
       for (const id of ids) {
         await reviewOpportunity(id, { review_status: status });
@@ -172,11 +195,20 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       await loadQueue();
     } catch {
       setError("Bulk update failed.");
+    } finally {
+      setBulkBusy(false);
     }
   }
 
   async function saveNote(id) {
-    await applyReview(id, { review_notes: notesDraft[id] || "" }, "notes saved");
+    const saved = await applyReview(
+      id,
+      { review_notes: notesDraft[id] || "" },
+      "notes saved",
+    );
+    if (saved) {
+      dirtyNotes.current.delete(id);
+    }
   }
 
   async function recomputePriorities() {
@@ -191,7 +223,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     }
   }
 
-  if (loading) {
+  if (!initialized) {
     return <p>Loading...</p>;
   }
 
@@ -289,13 +321,25 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       {selected.size ? (
         <div className="bulk-actions">
           <span>{selected.size} selected:</span>
-          <button type="button" onClick={() => bulkMark("Do Not Pursue")}>
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => bulkMark("Do Not Pursue")}
+          >
             Do Not Pursue
           </button>
-          <button type="button" onClick={() => bulkMark("Watchlist")}>
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => bulkMark("Watchlist")}
+          >
             Watchlist
           </button>
-          <button type="button" onClick={() => bulkMark("Archived")}>
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => bulkMark("Archived")}
+          >
             Archive
           </button>
         </div>
@@ -335,6 +379,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                   <input
                     type="checkbox"
                     checked={selected.has(opp.id)}
+                    aria-label={`Select ${opp.title}`}
                     onChange={() => toggleSelected(opp.id)}
                   />
                 </td>
@@ -492,12 +537,13 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                       type="text"
                       value={notesDraft[opp.id] ?? ""}
                       placeholder="Review notes"
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        dirtyNotes.current.add(opp.id);
                         setNotesDraft((current) => ({
                           ...current,
                           [opp.id]: event.target.value,
-                        }))
-                      }
+                        }));
+                      }}
                     />
                     <button
                       type="button"

@@ -270,7 +270,10 @@ def _load_parsed_text(opportunity_id: int, session, max_chars: int) -> str:
         path = Path(document.extracted_text_path)
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         chunk = text[:remaining]
         remaining -= len(chunk)
         chunks.append(chunk)
@@ -302,7 +305,8 @@ def extract_logistics_from_opportunity(opportunity: Opportunity, session) -> dic
     combined = f"{metadata_text}\n\n{parsed_text}"[:MAX_TEXT_CHARS]
     result = extract_logistics_from_text(combined)
 
-    # Prefer an existing structured due date from scraping if the text gave none.
+    # Prefer the freshly extracted due date; fall back to the existing
+    # structured value from scraping when the text gave none.
     due_date = result["due_date"] or opportunity.due_date
     q_and_a = result["q_and_a_deadline"] or opportunity.q_and_a_deadline
     pre_bid = result["pre_bid_date"] or opportunity.pre_bid_date
@@ -340,12 +344,32 @@ def apply_logistics_to_opportunity(opportunity_id: int, session) -> dict:
     opportunity.q_and_a_deadline = extracted["q_and_a_deadline"]
     opportunity.pre_bid_date = extracted["pre_bid_date"]
     opportunity.pre_bid_mandatory = extracted["pre_bid_mandatory"]
-    opportunity.submission_method = extracted["submission_method"]
-    opportunity.submission_portal = extracted["submission_portal"]
-    opportunity.required_forms_summary = extracted["required_forms_summary"]
+    opportunity.submission_method = (
+        extracted["submission_method"]
+        if extracted["submission_method"] is not None
+        else opportunity.submission_method
+    )
+    opportunity.submission_portal = (
+        extracted["submission_portal"]
+        if extracted["submission_portal"] is not None
+        else opportunity.submission_portal
+    )
+    opportunity.required_forms_summary = (
+        extracted["required_forms_summary"]
+        if extracted["required_forms_summary"] is not None
+        else opportunity.required_forms_summary
+    )
     opportunity.deadline_risk = extracted["deadline_risk"]
-    opportunity.logistics_confidence_score = extracted["logistics_confidence_score"]
-    opportunity.logistics_notes = extracted["logistics_notes"]
+    opportunity.logistics_confidence_score = (
+        extracted["logistics_confidence_score"]
+        if extracted["logistics_confidence_score"] is not None
+        else opportunity.logistics_confidence_score
+    )
+    opportunity.logistics_notes = (
+        extracted["logistics_notes"]
+        if extracted["logistics_notes"] is not None
+        else opportunity.logistics_notes
+    )
     opportunity.updated_at = datetime.now(UTC).replace(tzinfo=None)
 
     session.add(opportunity)

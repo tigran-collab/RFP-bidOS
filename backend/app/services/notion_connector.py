@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from sqlmodel import Session, select
+from sqlmodel import Session, or_, select
 
 import requests
 
@@ -416,7 +416,12 @@ def sync_opportunities(
     elif status:
         statement = statement.where(Opportunity.review_status == status)
     else:
-        statement = statement.where(Opportunity.review_status != "Archived")
+        statement = statement.where(
+            or_(
+                Opportunity.review_status != "Archived",
+                Opportunity.review_status.is_(None),
+            )
+        )
     opportunities = list(session.exec(statement).all())
     if limit and limit > 0:
         opportunities = opportunities[:limit]

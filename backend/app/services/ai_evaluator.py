@@ -139,7 +139,10 @@ def load_extracted_text_snippets(
         path = Path(document.extracted_text_path)
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         snippet = text[:remaining]
         remaining -= len(snippet)
         snippets.append(

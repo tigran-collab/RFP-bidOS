@@ -190,13 +190,6 @@ def _format_context(context: dict) -> str:
     return json.dumps(public_context, ensure_ascii=True, default=str, separators=(",", ":"))
 
 
-def _truncate(value: str, limit: int) -> str:
-    value = value.strip()
-    if len(value) <= limit:
-        return value
-    return value[: limit - 3].rstrip() + "..."
-
-
 def _chat_error_response(status: dict, summary: dict, category: str, message: str) -> dict:
     return {
         "answer": "",
