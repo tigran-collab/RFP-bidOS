@@ -232,6 +232,60 @@ def extract_document_candidates(
     return candidates
 
 
+# Tab/view labels and query hints that mark an alternate view of the same
+# page listing the bid documents (e.g. BidNet's ?innerTabId=documents tab).
+DOCUMENT_VIEW_LABELS = {
+    "documents",
+    "document",
+    "attachments",
+    "attachment",
+    "files",
+    "bid documents",
+    "solicitation documents",
+    "view documents",
+    "documents & attachments",
+}
+DOCUMENT_VIEW_QUERY_HINTS = ("document", "attachment", "file")
+
+
+def extract_document_view_links(html: str, page_url: str) -> list[str]:
+    """Same-page/tab links that likely lead to the bid's document list.
+
+    Portals often put documents behind a tab (same path, different query) or
+    a clearly labeled "Documents"/"Attachments" link. These are navigation —
+    never download candidates — but they are worth *visiting* to harvest the
+    real files. Same-host only.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    page_parsed = urlparse(page_url)
+    page_path = page_parsed.path.rstrip("/").lower()
+    views: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.find_all("a", href=True):
+        raw = str(anchor.get("href") or "").strip()
+        if not raw or raw.lower().startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+        url, _fragment = urldefrag(urljoin(page_url, raw))
+        parsed = urlparse(url)
+        if parsed.netloc.lower() != page_parsed.netloc.lower():
+            continue
+        if url in seen or url == page_url or is_document_url(url):
+            continue
+        text = normalize_space(anchor.get_text(" ", strip=True)).lower()
+        query = parsed.query.lower()
+        same_path = parsed.path.rstrip("/").lower() == page_path
+        query_hinted = same_path and query and any(
+            hint in query for hint in DOCUMENT_VIEW_QUERY_HINTS
+        )
+        label_hinted = text in DOCUMENT_VIEW_LABELS
+        if query_hinted or label_hinted:
+            seen.add(url)
+            views.append(url)
+    # Most explicit first: "documents" hints beat generic attachment labels.
+    views.sort(key=lambda url: "document" not in url.lower())
+    return views
+
+
 def extract_document_urls(html: str, base_url: str) -> list[str]:
     """Direct downloadable document file URLs only (feeds the downloader)."""
     return [

@@ -14,7 +14,10 @@ from app.services.scrapers.browser_session import (
     _download_by_selector,
     _filter_download_candidates,
 )
-from app.services.scrapers.extraction_utils import extract_document_candidates
+from app.services.scrapers.extraction_utils import (
+    extract_document_candidates,
+    extract_document_view_links,
+)
 
 PAGE_URL = "https://www.bidnetdirect.com/private/supplier/solicitations/notice/2697523412/abstract"
 
@@ -79,6 +82,40 @@ def test_duplicate_urls_dropped_but_distinct_queries_kept():
 def test_below_confidence_dropped():
     candidates = [_candidate("https://example.gov/doc.pdf", confidence=0.2)]
     assert _filter_download_candidates(candidates, PAGE_URL, 0.3) == []
+
+
+# --- document view discovery (tab links worth visiting, not downloading) -----
+def test_bidnet_documents_tab_discovered_as_view():
+    html = (
+        f'<a href="{PAGE_URL}?innerTabId=documents">Documents</a>'
+        f'<a href="{PAGE_URL}?innerTabId=categories">Categories</a>'
+    )
+    views = extract_document_view_links(html, PAGE_URL)
+    assert views == [f"{PAGE_URL}?innerTabId=documents"]
+
+
+def test_labeled_attachments_link_discovered_even_on_other_path():
+    html = '<a href="/portal/notice/999/attachments-list">Attachments</a>'
+    views = extract_document_view_links(html, PAGE_URL)
+    assert views == ["https://www.bidnetdirect.com/portal/notice/999/attachments-list"]
+
+
+def test_external_and_generic_links_not_views():
+    html = (
+        '<a href="https://other.example.com/documents">Documents</a>'
+        '<a href="/private/supplier/favorites">Favorites</a>'
+        f'<a href="{PAGE_URL}">Abstract</a>'
+    )
+    assert extract_document_view_links(html, PAGE_URL) == []
+
+
+def test_documents_view_sorted_first():
+    html = (
+        '<a href="/portal/notice/999/misc">Attachments</a>'
+        f'<a href="{PAGE_URL}?innerTabId=documents">Documents</a>'
+    )
+    views = extract_document_view_links(html, PAGE_URL)
+    assert views[0] == f"{PAGE_URL}?innerTabId=documents"
 
 
 # --- closed browser detection ------------------------------------------------

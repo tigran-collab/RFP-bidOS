@@ -505,6 +505,7 @@ def download_document_links_headed(
     """
     from app.services.scrapers.extraction_utils import (
         extract_document_candidates,
+        extract_document_view_links,
         is_document_url,
     )
 
@@ -558,36 +559,62 @@ def download_document_links_headed(
             result["final_url"] = page.url
             _raise_if_session_expired(status, page.url, html, page_url)
 
-            candidates = _filter_download_candidates(
-                extract_document_candidates(
-                    html, page.url, allow_external=allow_external
-                ),
-                page.url,
-                min_confidence,
-            )
-            result["candidates_found"] = len(candidates)
+            # Documents often live behind a tab ("Documents", ?innerTabId=...).
+            # Visit the loaded page first, then up to 3 document-view links
+            # discovered on it, harvesting downloads from each view.
+            views = [page.url, *extract_document_view_links(html, page.url)[:3]]
+            seen_candidate_urls: set[str] = set()
 
-            click_targets = _configured_click_targets(page, download_click_selectors)
-            download_queue = [*click_targets, *candidates]
+            try:
+                for candidate in _configured_click_targets(page, download_click_selectors):
+                    if result["downloads_attempted"] >= max_downloads:
+                        break
+                    result["downloads_attempted"] += 1
+                    _download_by_selector(page, candidate, output_path, timeout_ms, result)
 
-            for candidate in download_queue[:max_downloads]:
-                result["downloads_attempted"] += 1
-                before_count = len(result["downloaded_files"])
-                try:
-                    if candidate.get("selector"):
-                        _download_by_selector(page, candidate, output_path, timeout_ms, result)
-                    else:
+                for view_index, view_url in enumerate(views):
+                    if result["downloads_attempted"] >= max_downloads:
+                        break
+                    if view_index > 0:
+                        try:
+                            page.goto(view_url, timeout=timeout_ms)
+                            _settle_page(page, settle_ms)
+                            html = _read_html(page)
+                        except Exception as exc:  # noqa: BLE001 - skip this view
+                            if _browser_gone(exc):
+                                raise BrowserClosedError(str(exc)) from exc
+                            result["errors"].append(f"{view_url}: could not open view: {exc}")
+                            continue
+
+                    candidates = [
+                        candidate
+                        for candidate in _filter_download_candidates(
+                            extract_document_candidates(
+                                html, page.url, allow_external=allow_external
+                            ),
+                            page.url,
+                            min_confidence,
+                        )
+                        if candidate.get("url") not in seen_candidate_urls
+                    ]
+                    result["candidates_found"] += len(candidates)
+
+                    for candidate in candidates:
+                        if result["downloads_attempted"] >= max_downloads:
+                            break
+                        seen_candidate_urls.add(candidate.get("url"))
+                        result["downloads_attempted"] += 1
+                        before_count = len(result["downloaded_files"])
                         if is_document_url(candidate.get("url", "")):
                             _download_by_browser_request(
                                 context, candidate, output_path, timeout_ms, result
                             )
                         if len(result["downloaded_files"]) == before_count:
                             _download_by_click(page, context, candidate, output_path, timeout_ms, result)
-                except BrowserClosedError:
-                    result["errors"].append(
-                        "Browser window was closed before all downloads completed; stopping."
-                    )
-                    break
+            except BrowserClosedError:
+                result["errors"].append(
+                    "Browser window was closed before all downloads completed; stopping."
+                )
         finally:
             _save_session_state(context, profile_dir)
             try:
