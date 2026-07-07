@@ -146,25 +146,6 @@ class LogisticsQAByStatusRequest(BaseModel):
     limit: int = 10
 
 
-class LocalChatContext(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mode: str = "auto"
-    opportunity_id: int | None = None
-    include_opportunity: bool = True
-    include_requirements: bool = False
-    include_documents: bool = False
-    include_logistics: bool = False
-    limit: int | None = None
-
-
-class LocalChatRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    message: str
-    context: LocalChatContext | None = None
-
-
 class OpportunityUpdate(BaseModel):
     title: str | None = None
     agency: str | None = None

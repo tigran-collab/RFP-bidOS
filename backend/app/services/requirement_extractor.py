@@ -8,6 +8,7 @@ from sqlmodel import select
 
 from app.config import get_settings
 from app.models import Document, Opportunity, Requirement
+from app.services import ollama_client
 from app.services.ai_evaluator import LOCAL_AI_UNAVAILABLE
 
 
@@ -197,9 +198,8 @@ def _run_local_ai_extraction(opportunity_id: int, session) -> dict:
     settings = get_settings()
     prompt = build_requirement_extraction_prompt(opportunity, snippets)
     try:
-        response = requests.post(
-            f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-            json={
+        response = ollama_client._post_generate(
+            {
                 "model": settings.ollama_model,
                 "prompt": prompt,
                 "stream": False,
@@ -208,7 +208,6 @@ def _run_local_ai_extraction(opportunity_id: int, session) -> dict:
             },
             timeout=180,
         )
-        response.raise_for_status()
     except requests.RequestException:
         return {"error": LOCAL_AI_UNAVAILABLE}
 

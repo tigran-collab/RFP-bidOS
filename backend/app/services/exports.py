@@ -17,7 +17,7 @@ from app.models import (
     Opportunity,
     Requirement,
 )
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 
 ICS_PRODID = "-//RFP BidOS//Deadlines//EN"
 ICS_EXCLUDED_STATUSES = {"Archived", "Do Not Pursue"}

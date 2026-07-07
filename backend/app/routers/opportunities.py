@@ -60,7 +60,7 @@ from app.services.pursuit_workflow import (
 )
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
 from app.services.prioritization import apply_priority_to_all
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 

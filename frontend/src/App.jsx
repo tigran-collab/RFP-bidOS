@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import Layout from "./components/Layout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
-import LocalAIChatPage from "./pages/LocalAIChatPage.jsx";
 import OpportunityDetail from "./pages/OpportunityDetail.jsx";
 import Opportunities from "./pages/Opportunities.jsx";
 import NewOpportunity from "./pages/NewOpportunity.jsx";
@@ -16,7 +15,6 @@ const pages = {
   opportunities: Opportunities,
   newOpportunity: NewOpportunity,
   reviewQueue: ReviewQueue,
-  localAIChat: LocalAIChatPage,
   opportunityDetail: OpportunityDetail,
   scraper: Scraper,
   portals: Portals,

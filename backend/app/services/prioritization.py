@@ -22,7 +22,7 @@ from datetime import datetime
 from sqlmodel import Session, select
 
 from app.models import Opportunity
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 
 # Component weight ceilings.
 RELEVANCE_MAX = 40.0

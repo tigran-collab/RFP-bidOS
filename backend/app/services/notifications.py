@@ -10,7 +10,7 @@ from math import floor
 from sqlmodel import select
 
 from app.models import Opportunity
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 
 EXCLUDED_FROM_NEW = {"Archived"}
 EXCLUDED_FROM_DEADLINES = {"Archived", "Do Not Pursue"}

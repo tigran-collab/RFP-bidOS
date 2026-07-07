@@ -22,7 +22,6 @@ import {
   scoreOpportunity,
   updateOpportunity,
 } from "../api.js";
-import LocalAIChat from "../components/LocalAIChat.jsx";
 import OpportunityFields, {
   buildOpportunityPayload,
 } from "../components/OpportunityFields.jsx";
@@ -811,18 +810,6 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
           />
         </dl>
       )}
-      <h2>Ask Local AI about this opportunity</h2>
-      <LocalAIChat
-        compact
-        title="Local AI Chat"
-        context={{
-          mode: "opportunity",
-          opportunity_id: opportunityId,
-          include_opportunity: true,
-          include_requirements: true,
-          include_logistics: true,
-        }}
-      />
       <h2>Requirements / Compliance</h2>
       {!requirements.length ? (
         <p>No requirements found.</p>

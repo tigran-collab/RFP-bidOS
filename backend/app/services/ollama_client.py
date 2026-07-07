@@ -72,6 +72,26 @@ def list_ollama_models() -> dict:
     }
 
 
+def _post_generate(payload: dict, timeout: int):
+    """POST /api/generate, falling back to CPU when the GPU runner crashes.
+
+    A broken GPU stack (e.g. an Ollama/CUDA driver mismatch) makes every
+    generate call return 500 while /api/tags still lists the model as
+    available. Retrying with num_gpu=0 runs the model on CPU — slower, but
+    working — instead of failing every AI feature outright.
+    """
+    url = _api_url("/api/generate")
+    response = requests.post(url, json=payload, timeout=timeout)
+    if response.status_code >= 500:
+        cpu_payload = {
+            **payload,
+            "options": {**payload.get("options", {}), "num_gpu": 0},
+        }
+        response = requests.post(url, json=cpu_payload, timeout=timeout)
+    response.raise_for_status()
+    return response
+
+
 def generate_json(
     prompt: str,
     model: str | None = None,
@@ -87,8 +107,7 @@ def generate_json(
         "options": {"temperature": temperature},
     }
     try:
-        response = requests.post(_api_url("/api/generate"), json=payload, timeout=120)
-        response.raise_for_status()
+        response = _post_generate(payload, timeout=120)
         ollama_payload = response.json()
     except (requests.RequestException, ValueError) as exc:
         raise LocalAIUnavailableError(LOCAL_AI_UNAVAILABLE) from exc
@@ -129,8 +148,7 @@ def generate_text(
         },
     }
     try:
-        response = requests.post(_api_url("/api/generate"), json=payload, timeout=timeout)
-        response.raise_for_status()
+        response = _post_generate(payload, timeout=timeout)
         ollama_payload = response.json()
     except requests.Timeout as exc:
         raise LocalAITimeoutError(OLLAMA_TIMEOUT) from exc

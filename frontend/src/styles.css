@@ -466,17 +466,12 @@ textarea {
 }
 
 /* ---- Cards / panels ---- */
-.chat-panel,
 .edit-panel,
 .detail-grid {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-}
-
-.chat-panel {
-  padding: 1.25rem;
 }
 
 .edit-panel {
@@ -701,82 +696,6 @@ textarea {
   color: var(--danger);
 }
 
-/* ---- Chat ---- */
-.compact-chat h1 {
-  font-size: 1.2rem;
-  margin-bottom: 0.25rem;
-}
-
-.chat-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.starter-prompts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.85rem 0;
-}
-.starter-prompts button {
-  font-size: 0.85rem;
-}
-
-.chat-context-row {
-  margin: 0.85rem 0;
-}
-.chat-context-row label {
-  display: grid;
-  gap: 0.3rem;
-  max-width: 280px;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.chat-messages {
-  display: grid;
-  gap: 0.75rem;
-  min-height: 140px;
-  max-height: 460px;
-  overflow-y: auto;
-  margin: 1rem 0;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-base);
-}
-
-.chat-message {
-  max-width: 84%;
-  padding: 0.7rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-surface-2);
-  box-shadow: var(--shadow-sm);
-}
-.chat-message.user {
-  justify-self: end;
-  background: linear-gradient(135deg, var(--accent-soft), rgba(34, 211, 238, 0.1));
-  border-color: rgba(129, 140, 248, 0.35);
-}
-.chat-message p {
-  margin: 0.35rem 0 0;
-  white-space: pre-wrap;
-}
-
-.chat-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  align-items: end;
-}
-.chat-input-row textarea {
-  width: 100%;
-}
-
 /* ---- Detail grid ---- */
 .detail-grid {
   display: grid;
@@ -973,16 +892,6 @@ textarea {
 
   .detail-grid {
     grid-template-columns: 1fr;
-  }
-
-  .chat-header,
-  .chat-input-row {
-    grid-template-columns: 1fr;
-    flex-direction: column;
-  }
-
-  .chat-message {
-    max-width: 100%;
   }
 
   .detail-row dt {

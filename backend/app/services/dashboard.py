@@ -16,7 +16,7 @@ from app.models import (
     Requirement,
     SourceConfig,
 )
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 
 UPCOMING_WINDOW_DAYS = 30

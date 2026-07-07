@@ -21,6 +21,7 @@ class _FakeOllamaResponse:
     def __init__(self, payload):
         self._payload = payload
         self.text = json.dumps(payload)
+        self.status_code = 200
 
     def raise_for_status(self):
         return None

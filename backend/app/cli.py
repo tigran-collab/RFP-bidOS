@@ -21,7 +21,7 @@ from app.services.parser import (
     parse_documents_for_opportunity,
 )
 from app.services.portal_document_downloader import download_portal_documents_headed
-from app.services.local_chat_context import to_naive_utc
+from app.utils.dates import to_naive_utc
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import (
     discover_documents_for_opportunity,
