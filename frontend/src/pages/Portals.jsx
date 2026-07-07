@@ -24,6 +24,9 @@ function statusLabel(source, login) {
   if (login?.state === "launching" || login?.state === "awaiting_user") {
     return "Logging in";
   }
+  // A saved browser session is what downloads actually run on — report it
+  // even when the keychain credentials need (re-)saving.
+  if (login?.has_session_profile) return "Session saved";
   const auth = login?.auth_status?.auth_status || source.auth_status;
   if (auth === "Configured") return "Ready";
   return "Needs credentials";
@@ -73,6 +76,11 @@ export default function Portals() {
       setSources(credentialSources);
       setTemplates(loadedTemplates || []);
       setError("");
+      // Fill in live status (saved session, keychain state) per portal in the
+      // background so labels reflect reality on load, not the stale DB column.
+      credentialSources.forEach((source) => {
+        refreshLoginStatus(source.id);
+      });
     } catch {
       setError(loadError);
     } finally {
