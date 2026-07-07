@@ -112,6 +112,10 @@ export function updateOpportunity(id, payload) {
   return jsonRequest(`/opportunities/${id}`, payload, "PATCH");
 }
 
+export function deleteOpportunity(id) {
+  return request(`/opportunities/${id}`, { method: "DELETE" });
+}
+
 export function attachManualDocumentUrl(id, url, label) {
   return jsonRequest(`/opportunities/${id}/documents/manual-url`, { url, label }, "POST");
 }

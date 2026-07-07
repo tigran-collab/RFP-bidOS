@@ -376,6 +376,27 @@ h3 {
   opacity: 0.5;
 }
 
+.danger-button {
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  margin-left: auto;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.danger-button:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.24);
+  border-color: var(--danger);
+  transform: translateY(-1px);
+}
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .button-link {
   display: inline-flex;
   align-items: center;

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   aiEvaluateOpportunity,
   attachManualDocumentUrl,
+  deleteOpportunity,
   downloadDocument,
   downloadOpportunityDocuments,
   downloadOpportunityPortalDocuments,
@@ -109,7 +110,7 @@ function FactorList({ items }) {
   );
 }
 
-export default function OpportunityDetail({ opportunityId }) {
+export default function OpportunityDetail({ opportunityId, onNavigate }) {
   const [opportunity, setOpportunity] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [evaluations, setEvaluations] = useState([]);
@@ -120,6 +121,7 @@ export default function OpportunityDetail({ opportunityId }) {
   const [pursuitResult, setPursuitResult] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [portalDownloading, setPortalDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [docBusyId, setDocBusyId] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
@@ -217,6 +219,29 @@ export default function OpportunityDetail({ opportunityId }) {
       setActionError("Failed to run pursuit prep. Is the backend running?");
     } finally {
       setPreparing(false);
+    }
+  }
+
+  async function runDelete() {
+    const confirmed = window.confirm(
+      `Delete "${opportunity?.title || `opportunity ${opportunityId}`}"?\n\n` +
+        "This permanently removes the opportunity and its documents, " +
+        "requirements, evaluations, and QA results.",
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      setDeleting(true);
+      await deleteOpportunity(opportunityId);
+      if (onNavigate) {
+        onNavigate("opportunities");
+      } else {
+        setActionMessage("Opportunity deleted.");
+      }
+    } catch (err) {
+      setActionError(err.message || "Failed to delete opportunity.");
+      setDeleting(false);
     }
   }
 
@@ -484,10 +509,18 @@ export default function OpportunityDetail({ opportunityId }) {
         <button
           className="secondary-button"
           type="button"
-          disabled={busy || savingEdit}
+          disabled={busy || savingEdit || deleting}
           onClick={editing ? () => setEditing(false) : startEdit}
         >
           {editing ? "Cancel Edit" : "Edit Opportunity"}
+        </button>
+        <button
+          className="danger-button"
+          type="button"
+          disabled={busy || savingEdit || deleting}
+          onClick={runDelete}
+        >
+          {deleting ? "Deleting..." : "Delete"}
         </button>
       </div>
       <div className="action-groups">

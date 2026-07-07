@@ -40,6 +40,7 @@ export default function App() {
       <Page
         opportunityId={route.opportunityId}
         onOpenOpportunity={openOpportunity}
+        onNavigate={navigate}
       />
     </Layout>
   );
