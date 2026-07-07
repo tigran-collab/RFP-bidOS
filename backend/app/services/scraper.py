@@ -178,7 +178,10 @@ def discover_documents_for_opportunity(opportunity_id: int, session) -> dict:
 
     # If the opportunity URL is itself a direct file, nothing to crawl.
     if is_document_url(page_url):
-        summary["errors"].append("Opportunity URL is a direct document, not a page to crawl")
+        counts = _attach_document_urls(session, opportunity, [page_url])
+        session.commit()
+        summary["documents_discovered"] = counts["discovered"]
+        summary["documents_skipped"] = counts["skipped"]
         return summary
 
     try:

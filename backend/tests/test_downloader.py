@@ -89,3 +89,30 @@ def test_pending_document_downloads_new_content(session, tmp_path, monkeypatch):
     assert pending.path
     assert pending.filename == "addendum.pdf"
     assert pending.sha256
+
+
+def test_stale_document_path_is_redownloaded(session, tmp_path, monkeypatch):
+    monkeypatch.setattr(downloader, "DOWNLOAD_ROOT", tmp_path)
+    opportunity = _seed_opportunity(session)
+
+    stale = Document(
+        opportunity_id=opportunity.id,
+        filename="missing.pdf",
+        path=str(tmp_path / "opportunity_1" / "missing.pdf"),
+        source_url="https://example.com/docs/missing.pdf",
+    )
+    session.add(stale)
+    session.commit()
+
+    monkeypatch.setattr(
+        downloader.requests,
+        "get",
+        lambda url, **kwargs: _FakeResponse(b"%PDF-1.4 replacement"),
+    )
+
+    result = downloader.download_documents_for_opportunity(opportunity.id, session)
+
+    assert result["downloaded_count"] == 1
+    session.refresh(stale)
+    assert stale.path
+    assert downloader.resolve_downloaded_document_path(stale).exists()

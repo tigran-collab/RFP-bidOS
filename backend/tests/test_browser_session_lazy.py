@@ -39,6 +39,7 @@ def test_modules_are_importable_without_playwright():
     assert hasattr(browser_session, "playwright_available")
     assert hasattr(browser_session, "assisted_login")
     assert hasattr(browser_session, "fetch_authenticated_json")
+    assert hasattr(browser_session, "download_document_links_headed")
     assert hasattr(planetbids, "PlanetBidsAuthAdapter")
 
 
@@ -52,6 +53,12 @@ def test_helpers_raise_clear_error_when_missing(no_playwright):
     with pytest.raises(PlaywrightNotInstalledError):
         browser_session.fetch_authenticated_json(
             "https://example.gov/api", "/tmp/does-not-matter"
+        )
+    with pytest.raises(PlaywrightNotInstalledError):
+        browser_session.download_document_links_headed(
+            "https://example.gov/bid",
+            "/tmp/does-not-matter",
+            "/tmp/downloads",
         )
 
 

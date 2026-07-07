@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   aiEvaluateOpportunity,
   downloadOpportunityDocuments,
+  downloadOpportunityPortalDocuments,
   extractOpportunityRequirements,
   getReviewQueue,
   prioritizeAll,
@@ -123,7 +124,9 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       const result = await action(id);
       const summary =
         result?.downloaded_count !== undefined
-          ? `${result.downloaded_count} downloaded, ${result.skipped_count} skipped`
+          ? result?.downloads_attempted !== undefined
+            ? `${result.candidates_found ?? 0} candidates, ${result.downloads_attempted} attempted, ${result.downloaded_count} downloaded`
+            : `${result.documents_discovered ?? 0} discovered, ${result.downloaded_count} downloaded, ${result.skipped_count} skipped`
           : result?.requirements_count !== undefined
             ? `${result.requirements_count} requirements`
             : "done";
@@ -508,6 +511,19 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                       }
                     >
                       Download Docs
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === opp.id}
+                      onClick={() =>
+                        runAction(
+                          opp.id,
+                          downloadOpportunityPortalDocuments,
+                          "Headed Portal Docs",
+                        )
+                      }
+                    >
+                      Portal Docs
                     </button>
                     <button
                       type="button"

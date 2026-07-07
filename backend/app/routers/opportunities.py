@@ -35,6 +35,7 @@ from app.services.ai_evaluator import (
 from app.services.ai_summary import summarize_opportunity
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import parse_documents_for_opportunity
+from app.services.portal_document_downloader import download_portal_documents_headed
 from app.services.scraper import discover_documents_for_opportunity
 from app.services.requirement_extractor import (
     INVALID_JSON,
@@ -495,7 +496,28 @@ def download_opportunity_documents(opportunity_id: int) -> dict:
         opportunity = session.get(Opportunity, opportunity_id)
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
-        return download_documents_for_opportunity(opportunity_id, session)
+        discovery = discover_documents_for_opportunity(opportunity_id, session)
+        download = download_documents_for_opportunity(opportunity_id, session)
+
+    return {
+        **download,
+        "documents_discovered": discovery.get("documents_discovered", 0),
+        "documents_skipped_discovery": discovery.get("documents_skipped", 0),
+        "discovery_errors": discovery.get("errors", []),
+        "errors": [
+            *(discovery.get("errors") or []),
+            *(download.get("errors") or []),
+        ],
+    }
+
+
+@router.post("/{opportunity_id}/download-portal-documents")
+def download_opportunity_portal_documents(opportunity_id: int) -> dict:
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        return download_portal_documents_headed(opportunity_id, session)
 
 
 @router.post("/{opportunity_id}/parse-documents")

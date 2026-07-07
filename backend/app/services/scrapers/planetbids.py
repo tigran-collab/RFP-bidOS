@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
+from app.config import BROWSER_PROFILE_ROOT
 from app.services.scrapers.base import ScraperResult
 from app.services.scrapers.browser_session import (
     PlaywrightNotInstalledError,
@@ -70,14 +71,10 @@ DEFAULT_FIELD_MAP = {
     "description": "description",
 }
 
-# Where each source's persisted browser profile lives. Gitignored.
-_PROFILE_ROOT = Path(__file__).resolve().parents[3] / "data" / "browser_profiles"
-
-
 def profile_dir_for_source(source_config) -> str:
     source_id = getattr(source_config, "id", None)
     key = str(source_id) if source_id is not None else "unknown"
-    return str(_PROFILE_ROOT / key)
+    return str(BROWSER_PROFILE_ROOT / key)
 
 
 class PlanetBidsAuthAdapter:

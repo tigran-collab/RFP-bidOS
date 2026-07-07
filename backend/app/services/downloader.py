@@ -7,11 +7,11 @@ from urllib.parse import unquote, urlparse
 import requests
 from sqlmodel import select
 
+from app.config import BACKEND_ROOT, DOWNLOAD_ROOT
 from app.models import Document, Opportunity
 
 
 DOWNLOADER_USER_AGENT = "RFP-BidOS Document Downloader/0.1 (+direct public URLs)"
-DOWNLOAD_ROOT = Path("data/downloads")
 DOWNLOADABLE_EXTENSIONS = {
     ".pdf",
     ".doc",
@@ -55,6 +55,24 @@ def sha256_file(path: str) -> str:
     return digest.hexdigest()
 
 
+def resolve_downloaded_document_path(document: Document) -> Path | None:
+    """Return a safe existing local file path for a downloaded document."""
+    if not document.path:
+        return None
+    path = Path(document.path)
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    try:
+        resolved = path.resolve()
+        root = DOWNLOAD_ROOT.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
 def download_document(url: str, opportunity_id: int, session) -> dict:
     summary = _empty_summary()
 
@@ -66,7 +84,11 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
             Document.opportunity_id == opportunity_id,
         )
     ).first()
-    if existing_by_url is not None and existing_by_url.path:
+    if (
+        existing_by_url is not None
+        and existing_by_url.path
+        and resolve_downloaded_document_path(existing_by_url) is not None
+    ):
         summary["skipped_count"] += 1
         summary["documents"].append(existing_by_url)
         return summary
@@ -137,6 +159,20 @@ def download_document(url: str, opportunity_id: int, session) -> dict:
     return summary
 
 
+def download_document_by_id(document_id: int, session) -> dict:
+    summary = _empty_summary()
+    document = session.get(Document, document_id)
+    if document is None:
+        summary["errors"].append("Document not found")
+        return summary
+    if not document.source_url:
+        summary["skipped_count"] += 1
+        summary["errors"].append("Document has no source_url")
+        summary["documents"].append(document)
+        return summary
+    return download_document(document.source_url, document.opportunity_id, session)
+
+
 def download_documents_for_opportunity(opportunity_id: int, session) -> dict:
     summary = _empty_summary()
     opportunity = session.get(Opportunity, opportunity_id)
@@ -144,17 +180,26 @@ def download_documents_for_opportunity(opportunity_id: int, session) -> dict:
         summary["errors"].append("Opportunity not found")
         return summary
 
-    pending_documents = list(
+    known_documents = list(
         session.exec(
             select(Document).where(
                 Document.opportunity_id == opportunity_id,
                 Document.source_url != None,
-                Document.path == "",
             )
         ).all()
     )
-    if pending_documents:
-        for document in pending_documents:
+    if known_documents:
+        documents_to_download = [
+            document
+            for document in known_documents
+            if not document.path or resolve_downloaded_document_path(document) is None
+        ]
+        if not documents_to_download:
+            summary["skipped_count"] += len(known_documents)
+            summary["documents"].extend(known_documents)
+            return summary
+
+        for document in documents_to_download:
             result = download_document(document.source_url, opportunity_id, session)
             summary = _merge_summary(summary, result)
         return summary

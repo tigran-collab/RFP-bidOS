@@ -45,6 +45,7 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from app.config import BROWSER_PROFILE_ROOT
 from app.services.scrapers.base import ScraperResult
 from app.services.scrapers.browser_session import (
     PlaywrightNotInstalledError,
@@ -62,15 +63,10 @@ from app.services.scrapers.table_parser import parse_tables
 
 SOURCE_TYPE = "authenticated_browser"
 
-# Where each source's persisted browser profile lives. Shared with the
-# PlanetBids adapter's layout: backend/data/browser_profiles/{source_id}/.
-_PROFILE_ROOT = Path(__file__).resolve().parents[3] / "data" / "browser_profiles"
-
-
 def profile_dir_for_source(source_config) -> str:
     source_id = getattr(source_config, "id", None)
     key = str(source_id) if source_id is not None else "unknown"
-    return str(_PROFILE_ROOT / key)
+    return str(BROWSER_PROFILE_ROOT / key)
 
 
 class AuthenticatedBrowserAdapter:

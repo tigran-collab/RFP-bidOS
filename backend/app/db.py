@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine
 
 from app import models  # noqa: F401
-from app.config import get_settings
+from app.config import get_settings, sqlite_file_path_from_url
 
 settings = get_settings()
 engine = create_engine(settings.database_url, echo=False)
@@ -121,11 +121,11 @@ _SQLITE_COLUMN_MIGRATIONS: tuple[tuple[str, dict[str, str]], ...] = (
 
 
 def init_db() -> None:
-    if settings.database_url.startswith("sqlite:///"):
-        db_path = settings.database_url.replace("sqlite:///", "", 1)
+    db_path = sqlite_file_path_from_url(settings.database_url)
+    if db_path is not None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
-    if settings.database_url.startswith("sqlite:///"):
+    if db_path is not None:
         for table, columns in _SQLITE_COLUMN_MIGRATIONS:
             _ensure_columns(table, columns)
 

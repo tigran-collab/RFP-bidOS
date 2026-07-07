@@ -88,6 +88,32 @@ def test_navigation_title_is_not_relevant():
     assert result["relevance_decision"] == "Not Relevant"
 
 
+# --- Federal scope should be rejected even when security-relevant ------------
+
+
+def test_federal_security_guard_opportunity_is_not_relevant():
+    result = score_candidate_relevance(
+        _candidate(
+            "National Cemetery Administration - Unarmed Security Guards",
+            agency="U.S. Department of Veterans Affairs",
+        )
+    )
+    assert result["relevance_decision"] == "Not Relevant"
+    assert "national cemetery administration" in result["negative_matches"]
+    assert "federal scope excluded" in result["relevance_reason"]
+
+
+def test_sam_gov_security_opportunity_is_not_relevant():
+    result = score_candidate_relevance(
+        _candidate(
+            "Armed Security Guard Services",
+            source_url="https://sam.gov/opp/example",
+        )
+    )
+    assert result["relevance_decision"] == "Not Relevant"
+    assert "sam.gov" in result["negative_matches"]
+
+
 # --- As-needed / on-call language is a caution, not a rejection -------------
 
 

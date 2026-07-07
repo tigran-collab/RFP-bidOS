@@ -4,10 +4,10 @@ from pathlib import Path
 
 from sqlmodel import select
 
+from app.config import PROCESSED_ROOT
 from app.models import Document
 
 
-PROCESSED_ROOT = Path("data/processed")
 PDF_TYPES = {"pdf", ".pdf", "application/pdf"}
 TXT_TYPES = {"txt", ".txt", "text/plain"}
 

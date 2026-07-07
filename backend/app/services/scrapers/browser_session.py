@@ -35,6 +35,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 def _browser_channels() -> list[str | None]:
@@ -54,7 +55,7 @@ def _browser_channels() -> list[str | None]:
     return ["chrome", "chromium", None]
 
 
-def _launch_persistent_context(pw, profile_dir: str, headless: bool):
+def _launch_persistent_context(pw, profile_dir: str, headless: bool, **extra):
     """Launch a persistent context, trying system browsers before bundled Chromium.
 
     The same channel order is used everywhere so the persisted login session is
@@ -62,7 +63,7 @@ def _launch_persistent_context(pw, profile_dir: str, headless: bool):
     """
     errors = []
     for channel in _browser_channels():
-        kwargs = {"headless": headless}
+        kwargs = {"headless": headless, **extra}
         if channel:
             kwargs["channel"] = channel
         try:
@@ -71,6 +72,20 @@ def _launch_persistent_context(pw, profile_dir: str, headless: bool):
             label = channel or "chromium"
             errors.append(f"{label}: {str(exc).splitlines()[0] if str(exc) else type(exc).__name__}")
     raise RuntimeError("No launchable browser. Tried -> " + "; ".join(errors))
+
+
+_DOWNLOADABLE_CONTENT_TYPES = {
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "text/csv": ".csv",
+    "application/csv": ".csv",
+    "application/zip": ".zip",
+    "application/x-zip-compressed": ".zip",
+    "text/plain": ".txt",
+}
 
 # Best-effort selectors for pre-filling the login form. These are only
 # conveniences for the human; if none match, the human simply types the
@@ -453,6 +468,318 @@ def capture_page(
                 context.close()
             except Exception:
                 pass
+
+
+def download_document_links_headed(
+    page_url: str,
+    profile_dir: str,
+    output_dir: str,
+    wait_selector: str | None = None,
+    pre_click_selectors: list[str] | None = None,
+    download_click_selectors: list[str] | None = None,
+    timeout_seconds: int = 120,
+    max_downloads: int = 25,
+    min_confidence: float = 0.3,
+    settle_ms: int = 1500,
+    allow_external: bool = False,
+) -> dict:
+    """Open a visible authenticated browser and save bid-document downloads.
+
+    This reuses the human-established portal session, opens the opportunity in
+    a visible browser, optionally clicks configured tabs/expanders, then clicks
+    document-like links or configured download controls. It never logs in,
+    solves CAPTCHA, submits bids, or bypasses access controls.
+    """
+    from app.services.scrapers.extraction_utils import (
+        extract_document_candidates,
+        is_document_url,
+    )
+
+    sync_playwright = _require_playwright()
+    if not Path(profile_dir).exists():
+        raise SessionExpiredError(
+            f"No persisted browser profile at {profile_dir}. Run assisted login first."
+        )
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    timeout_ms = max(1, int(timeout_seconds)) * 1000
+    max_downloads = max(1, int(max_downloads))
+    min_confidence = max(0.0, float(min_confidence))
+
+    result = {
+        "page_url": page_url,
+        "final_url": None,
+        "candidates_found": 0,
+        "downloads_attempted": 0,
+        "downloaded_files": [],
+        "errors": [],
+    }
+
+    with sync_playwright() as pw:
+        context = _launch_persistent_context(
+            pw, profile_dir, headless=False, accept_downloads=True
+        )
+        _restore_session_state(context, profile_dir)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            response = page.goto(page_url, timeout=timeout_ms)
+            status = response.status if response is not None else None
+            _settle_page(page, settle_ms)
+
+            for selector in _clean_selectors(pre_click_selectors):
+                try:
+                    locator = page.locator(selector).first
+                    if locator.count() > 0:
+                        locator.click(timeout=timeout_ms)
+                        _settle_page(page, settle_ms)
+                except Exception as exc:  # noqa: BLE001 - keep trying other selectors
+                    result["errors"].append(f"Pre-click selector failed ({selector}): {exc}")
+
+            if wait_selector and "TODO" not in str(wait_selector):
+                try:
+                    page.wait_for_selector(wait_selector, timeout=timeout_ms)
+                except Exception:
+                    pass
+
+            html = _read_html(page)
+            result["final_url"] = page.url
+            _raise_if_session_expired(status, page.url, html, page_url)
+
+            candidates = [
+                c
+                for c in extract_document_candidates(
+                    html, page.url, allow_external=allow_external
+                )
+                if float(c.get("confidence_score") or 0) >= min_confidence
+            ]
+            result["candidates_found"] = len(candidates)
+
+            click_targets = _configured_click_targets(page, download_click_selectors)
+            download_queue = [*click_targets, *candidates]
+
+            for candidate in download_queue[:max_downloads]:
+                result["downloads_attempted"] += 1
+                before_count = len(result["downloaded_files"])
+                if candidate.get("selector"):
+                    _download_by_selector(page, candidate, output_path, timeout_ms, result)
+                else:
+                    if is_document_url(candidate.get("url", "")):
+                        _download_by_browser_request(
+                            context, candidate, output_path, timeout_ms, result
+                        )
+                    if len(result["downloaded_files"]) == before_count:
+                        _download_by_click(page, context, candidate, output_path, timeout_ms, result)
+        finally:
+            _save_session_state(context, profile_dir)
+            try:
+                context.close()
+            except Exception:
+                pass
+
+    return result
+
+
+def _clean_selectors(selectors: list[str] | None) -> list[str]:
+    return [
+        selector
+        for selector in (selectors or [])
+        if selector and "TODO" not in str(selector)
+    ]
+
+
+def _settle_page(page, settle_ms: int) -> None:
+    for state in ("domcontentloaded", "networkidle"):
+        try:
+            page.wait_for_load_state(state, timeout=settle_ms)
+        except Exception:
+            pass
+
+
+def _configured_click_targets(page, selectors: list[str] | None) -> list[dict]:
+    targets = []
+    for selector in _clean_selectors(selectors):
+        try:
+            count = min(page.locator(selector).count(), 25)
+        except Exception:
+            continue
+        for index in range(count):
+            targets.append(
+                {
+                    "selector": selector,
+                    "selector_index": index,
+                    "label": selector,
+                    "url": "",
+                    "confidence_score": 1.0,
+                    "reason": "configured portal download selector",
+                }
+            )
+    return targets
+
+
+def _download_by_browser_request(
+    context,
+    candidate: dict,
+    output_dir: Path,
+    timeout_ms: int,
+    result: dict,
+) -> None:
+    url = candidate.get("url")
+    if not url:
+        return
+    try:
+        response = context.request.get(url, timeout=timeout_ms)
+        status = response.status
+        body = response.body()
+        headers = {key.lower(): value for key, value in response.headers.items()}
+        content_type = (headers.get("content-type") or "").split(";", 1)[0].lower()
+        text_sample = body[:2000].decode("utf-8", errors="ignore")
+        _raise_if_session_expired(status, response.url, text_sample, url)
+        if status >= 400:
+            result["errors"].append(f"{url}: HTTP {status}")
+            return
+        extension = _extension_for_download(url, content_type)
+        if not extension:
+            return
+        filename = _filename_for_response(url, headers, candidate, extension)
+        path = _available_output_path(output_dir / filename)
+        path.write_bytes(body)
+        result["downloaded_files"].append(
+            {
+                "url": url,
+                "label": candidate.get("label") or filename,
+                "path": str(path),
+                "filename": path.name,
+                "content_type": content_type or None,
+                "method": "browser_request",
+            }
+        )
+    except SessionExpiredError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - try the click path next
+        result["errors"].append(f"{url}: browser request failed: {exc}")
+
+
+def _download_by_click(
+    page,
+    context,
+    candidate: dict,
+    output_dir: Path,
+    timeout_ms: int,
+    result: dict,
+) -> None:
+    url = candidate.get("url")
+    if not url:
+        return
+    token = f"rfp-bidos-download-{abs(hash(url))}"
+    try:
+        found = page.evaluate(
+            """({url, token}) => {
+                const anchors = Array.from(document.querySelectorAll('a[href]'));
+                for (const anchor of anchors) {
+                    const resolved = new URL(anchor.getAttribute('href'), document.baseURI).href.split('#')[0];
+                    if (resolved === url) {
+                        anchor.setAttribute('data-rfp-bidos-download-target', token);
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            {"url": url, "token": token},
+        )
+        if not found:
+            result["errors"].append(f"{url}: link not found on page")
+            return
+        locator = page.locator(f'[data-rfp-bidos-download-target="{token}"]').first
+        _save_click_download(page, locator, candidate, output_dir, timeout_ms, result)
+    except Exception as exc:  # noqa: BLE001
+        # Fallback: a click sometimes opens a document URL inline rather than a
+        # download. Try the browser request path one last time.
+        before_count = len(result["downloaded_files"])
+        _download_by_browser_request(context, candidate, output_dir, timeout_ms, result)
+        if len(result["downloaded_files"]) == before_count:
+            result["errors"].append(f"{url}: click failed: {exc}")
+
+
+def _download_by_selector(
+    page,
+    candidate: dict,
+    output_dir: Path,
+    timeout_ms: int,
+    result: dict,
+) -> None:
+    selector = candidate.get("selector")
+    index = int(candidate.get("selector_index") or 0)
+    try:
+        locator = page.locator(selector).nth(index)
+        _save_click_download(page, locator, candidate, output_dir, timeout_ms, result)
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"{selector}: configured click failed: {exc}")
+
+
+def _save_click_download(page, locator, candidate: dict, output_dir: Path, timeout_ms: int, result: dict) -> None:
+    with page.expect_download(timeout=timeout_ms) as download_info:
+        locator.click(timeout=timeout_ms)
+    download = download_info.value
+    filename = download.suggested_filename or _filename_from_url(candidate.get("url")) or "document"
+    path = _available_output_path(output_dir / filename)
+    download.save_as(str(path))
+    result["downloaded_files"].append(
+        {
+            "url": candidate.get("url") or getattr(download, "url", None),
+            "label": candidate.get("label") or filename,
+            "path": str(path),
+            "filename": path.name,
+            "content_type": None,
+            "method": "click_download",
+        }
+    )
+
+
+def _extension_for_download(url: str, content_type: str | None) -> str | None:
+    suffix = Path(unquote(urlparse(url).path)).suffix.lower()
+    if suffix in {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".zip", ".txt"}:
+        return suffix
+    return _DOWNLOADABLE_CONTENT_TYPES.get(content_type or "")
+
+
+def _filename_for_response(url: str, headers: dict, candidate: dict, extension: str) -> str:
+    disposition = headers.get("content-disposition") or ""
+    filename = _filename_from_content_disposition(disposition)
+    if not filename:
+        filename = _filename_from_url(url)
+    if not filename:
+        label = str(candidate.get("label") or "document")
+        filename = "".join(char if char.isalnum() else "_" for char in label).strip("_")
+    filename = filename or "document"
+    if not Path(filename).suffix and extension:
+        filename = f"{filename}{extension}"
+    return filename
+
+
+def _filename_from_content_disposition(value: str) -> str | None:
+    if "filename=" not in value.lower():
+        return None
+    raw = value.split("filename=", 1)[1].strip().strip('"')
+    return Path(raw).name or None
+
+
+def _filename_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    name = Path(unquote(urlparse(url).path)).name
+    return name or None
+
+
+def _available_output_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem or "document"
+    suffix = path.suffix
+    for index in range(1, 1000):
+        candidate = path.with_name(f"{stem}_{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Could not create a non-conflicting filename for {path.name}")
 
 
 def _read_html(page) -> str:

@@ -128,6 +128,18 @@ export function downloadOpportunityDocuments(id) {
   return request(`/opportunities/${id}/download-documents`, { method: "POST" });
 }
 
+export function downloadOpportunityPortalDocuments(id) {
+  return request(`/opportunities/${id}/download-portal-documents`, { method: "POST" });
+}
+
+export function downloadDocument(id) {
+  return request(`/documents/${id}/download`, { method: "POST" });
+}
+
+export function getDocumentFileUrl(id) {
+  return `${API_BASE_URL}/documents/${id}/file`;
+}
+
 export function parseOpportunityDocuments(id) {
   return request(`/opportunities/${id}/parse-documents`, { method: "POST" });
 }

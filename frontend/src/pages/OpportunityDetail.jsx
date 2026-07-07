@@ -3,11 +3,14 @@ import { useEffect, useState } from "react";
 import {
   aiEvaluateOpportunity,
   attachManualDocumentUrl,
+  downloadDocument,
   discoverOpportunityDocuments,
   downloadOpportunityDocuments,
+  downloadOpportunityPortalDocuments,
   extractOpportunityLogistics,
   extractOpportunityRequirements,
   generateAiSummary,
+  getDocumentFileUrl,
   getLogisticsQA,
   getOpportunity,
   getOpportunityDocuments,
@@ -118,6 +121,8 @@ export default function OpportunityDetail({ opportunityId }) {
   const [preparing, setPreparing] = useState(false);
   const [pursuitResult, setPursuitResult] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [portalDownloading, setPortalDownloading] = useState(false);
+  const [docBusyId, setDocBusyId] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [aiEvaluating, setAiEvaluating] = useState(false);
   const [aiSummarizing, setAiSummarizing] = useState(false);
@@ -330,14 +335,52 @@ export default function OpportunityDetail({ opportunityId }) {
       setDownloading(true);
       const result = await downloadOpportunityDocuments(opportunityId);
       setDocuments(await getOpportunityDocuments(opportunityId));
+      const discovered =
+        result.documents_discovered !== undefined
+          ? `${result.documents_discovered} discovered, `
+          : "";
       setActionMessage(
-        `${result.downloaded_count} downloaded, ${result.skipped_count} skipped.`
+        `${discovered}${result.downloaded_count} downloaded, ${result.skipped_count} skipped.`
       );
       setActionError(result.errors?.length ? result.errors.join("; ") : "");
     } catch {
       setActionError("Failed to download documents. Is the backend running?");
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function runPortalDownload() {
+    try {
+      setPortalDownloading(true);
+      const result = await downloadOpportunityPortalDocuments(opportunityId);
+      setDocuments(await getOpportunityDocuments(opportunityId));
+      setActionMessage(
+        `Headed portal download: ${result.candidates_found} candidates, ` +
+          `${result.downloads_attempted} attempted, ` +
+          `${result.downloaded_count} downloaded, ${result.skipped_count} skipped.`
+      );
+      setActionError(result.errors?.length ? result.errors.join("; ") : "");
+    } catch (err) {
+      setActionError(err.message || "Failed to run headed portal download.");
+    } finally {
+      setPortalDownloading(false);
+    }
+  }
+
+  async function runSingleDocumentDownload(documentId) {
+    try {
+      setDocBusyId(documentId);
+      const result = await downloadDocument(documentId);
+      setDocuments(await getOpportunityDocuments(opportunityId));
+      setActionMessage(
+        `Document ${documentId}: ${result.downloaded_count} downloaded, ${result.skipped_count} skipped.`
+      );
+      setActionError(result.errors?.length ? result.errors.join("; ") : "");
+    } catch (err) {
+      setActionError(err.message || `Failed to download document ${documentId}.`);
+    } finally {
+      setDocBusyId(null);
     }
   }
 
@@ -432,6 +475,7 @@ export default function OpportunityDetail({ opportunityId }) {
     discovering ||
     preparing ||
     downloading ||
+    portalDownloading ||
     parsing ||
     aiEvaluating ||
     aiSummarizing ||
@@ -498,6 +542,14 @@ export default function OpportunityDetail({ opportunityId }) {
           onClick={runDownload}
         >
           {downloading ? "Downloading..." : "Download Documents"}
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy}
+          onClick={runPortalDownload}
+        >
+          {portalDownloading ? "Opening Portal..." : "Headed Portal Download"}
         </button>
         <button
           className="primary-button"
@@ -827,6 +879,7 @@ export default function OpportunityDetail({ opportunityId }) {
               <th>Status</th>
               <th>Extracted Text Path</th>
               <th>Source URL</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -848,6 +901,28 @@ export default function OpportunityDetail({ opportunityId }) {
                   ) : (
                     ""
                   )}
+                </td>
+                <td>
+                  <div className="document-actions">
+                    {document.source_url ? (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={docBusyId === document.id || busy}
+                        onClick={() => runSingleDocumentDownload(document.id)}
+                      >
+                        {docBusyId === document.id ? "Fetching..." : "Fetch File"}
+                      </button>
+                    ) : null}
+                    {document.path ? (
+                      <a
+                        className="secondary-button button-link"
+                        href={getDocumentFileUrl(document.id)}
+                      >
+                        Download File
+                      </a>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}

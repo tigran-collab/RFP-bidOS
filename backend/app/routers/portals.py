@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
+from app.config import BROWSER_PROFILE_ROOT
 from app.db import engine
 from app.models import SourceConfig
 from app.schemas import SourceConfigRead
@@ -223,8 +224,7 @@ def delete_source_credentials(source_id: int) -> dict:
 # 5. Start assisted login in a background thread.
 # ---------------------------------------------------------------------------
 def _profile_dir_for_source_id(source_id: int) -> str:
-    root = Path(__file__).resolve().parents[2] / "data" / "browser_profiles"
-    return str(root / str(source_id))
+    return str(BROWSER_PROFILE_ROOT / str(source_id))
 
 
 def _portal_login_url(source: SourceConfig) -> str | None:

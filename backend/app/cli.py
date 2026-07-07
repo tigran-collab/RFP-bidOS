@@ -7,7 +7,7 @@ import typer
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
-from app.config import get_settings
+from app.config import DATA_ROOT, get_settings, sqlite_file_path_from_url
 from app.db import engine, init_db
 from app.models import Document, Opportunity, ScrapeRun, SourceConfig
 from app.schemas import OpportunityCreate, OpportunityUpdate
@@ -20,6 +20,7 @@ from app.services.parser import (
     parse_document,
     parse_documents_for_opportunity,
 )
+from app.services.portal_document_downloader import download_portal_documents_headed
 from app.services.local_chat_context import to_naive_utc
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import (
@@ -97,11 +98,11 @@ def backup_db_command(
 
     settings = get_settings()
     url = settings.database_url
-    if not url.startswith("sqlite:///"):
+    db_path = sqlite_file_path_from_url(url)
+    if db_path is None:
         typer.echo("backup-db only supports local SQLite databases.")
         raise typer.Exit(code=1)
 
-    db_path = Path(url.replace("sqlite:///", "", 1))
     if not db_path.exists():
         typer.echo(f"Database file not found: {db_path}. Run init-db first.")
         raise typer.Exit(code=1)
@@ -1359,7 +1360,7 @@ def portal_fetch_debug_command(
         typer.echo("No usable URL. Pass --url with the logged-in solicitations page.", err=True)
         raise typer.Exit(code=1)
 
-    out_path = Path(out) if out else Path("data") / f"portal_debug_{source_id}.html"
+    out_path = Path(out) if out else DATA_ROOT / f"portal_debug_{source_id}.html"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     typer.echo(f"Fetching {page_url} via the saved session ({'visible' if headed else 'headless'})...")
@@ -1753,6 +1754,27 @@ def download_documents_command(opportunity_id: int) -> None:
 
     typer.echo(f"Downloaded: {result['downloaded_count']}")
     typer.echo(f"Skipped: {result['skipped_count']}")
+    if result["errors"]:
+        typer.echo(f"Errors: {'; '.join(result['errors'])}")
+
+
+@cli.command("download-portal-documents")
+def download_portal_documents_command(opportunity_id: int) -> None:
+    """Open a visible authenticated portal session and download bid documents."""
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        result = download_portal_documents_headed(opportunity_id, session)
+
+    typer.echo(f"Candidates found: {result['candidates_found']}")
+    typer.echo(f"Downloads attempted: {result['downloads_attempted']}")
+    typer.echo(f"Downloaded: {result['downloaded_count']}")
+    typer.echo(f"Skipped: {result['skipped_count']}")
+    for file in result["files"]:
+        typer.echo(f"  - {file['filename']} ({file['path']})")
     if result["errors"]:
         typer.echo(f"Errors: {'; '.join(result['errors'])}")
 

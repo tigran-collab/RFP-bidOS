@@ -85,6 +85,26 @@ NEGATIVE_KEYWORDS = (
     "recruitment services",
 )
 
+FEDERAL_SCOPE_KEYWORDS = (
+    "sam.gov",
+    "sam gov",
+    "grants.gov",
+    "federal business opportunities",
+    "u.s. department",
+    "us department",
+    "united states department",
+    "department of veterans affairs",
+    "veterans affairs",
+    "national cemetery administration",
+    "general services administration",
+    "department of homeland security",
+    "department of defense",
+    "department of justice",
+    "federal bureau",
+    "federal agency",
+    "federal government",
+)
+
 AS_NEEDED_WARNING_KEYWORDS = (
     "as needed",
     "as-needed",
@@ -175,6 +195,9 @@ def score_candidate_relevance(candidate) -> dict:
                 getattr(candidate, "service_type", None),
                 getattr(candidate, "contract_type", None),
                 getattr(candidate, "agency", None),
+                getattr(candidate, "source_url", None),
+                getattr(candidate, "detail_url", None),
+                getattr(candidate, "portal_url", None),
             )
         )
     )
@@ -186,6 +209,7 @@ def score_candidate_relevance(candidate) -> dict:
     secondary_body = _matches(body, SECONDARY_SECURITY_KEYWORDS)
     negative_title = _matches(title, NEGATIVE_KEYWORDS)
     negative_body = _matches(body, NEGATIVE_KEYWORDS)
+    federal_scope = _matches(combined, FEDERAL_SCOPE_KEYWORDS)
     as_needed = _matches(combined, AS_NEEDED_WARNING_KEYWORDS)
     procurement_title = _matches(title, PROCUREMENT_KEYWORDS)
     procurement_any = _matches(combined, PROCUREMENT_KEYWORDS)
@@ -204,6 +228,7 @@ def score_candidate_relevance(candidate) -> dict:
 
     score -= 60 * len(negative_title)
     score -= 30 * len([kw for kw in negative_body if kw not in negative_title])
+    score -= 100 * len(federal_scope)
     if not (primary_title or primary_body or secondary_title or secondary_body):
         score -= 50
     if title in GENERIC_NAVIGATION_TITLES:
@@ -214,7 +239,7 @@ def score_candidate_relevance(candidate) -> dict:
     keyword_matches = _unique(
         [*primary_title, *primary_body, *secondary_title, *secondary_body]
     )
-    negative_matches = _unique([*negative_title, *negative_body])
+    negative_matches = _unique([*negative_title, *negative_body, *federal_scope])
     has_security_match = bool(keyword_matches)
     has_procurement_or_security_signal = bool(procurement_any or keyword_matches)
 
@@ -227,12 +252,16 @@ def score_candidate_relevance(candidate) -> dict:
 
     if negative_matches and not has_security_match:
         decision = "Not Relevant"
+    if federal_scope:
+        decision = "Not Relevant"
 
     reason_parts = []
     if keyword_matches:
         reason_parts.append(f"matched {', '.join(keyword_matches[:4])}")
     if negative_matches:
         reason_parts.append(f"negative {', '.join(negative_matches[:3])}")
+    if federal_scope:
+        reason_parts.append("federal scope excluded")
     if as_needed:
         reason_parts.append("as-needed/on-call caution")
     if not reason_parts:
