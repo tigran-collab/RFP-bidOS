@@ -96,6 +96,29 @@ GENERIC_LINK_TEXT = {
     "learn more",
 }
 
+# URL path segments that mark portal navigation (search pages, account areas),
+# never documents, unless the href is itself a direct downloadable file.
+NAVIGATION_URL_SEGMENTS = {
+    "search",
+    "searches",
+    "saved-searches",
+    "favorites",
+    "favourites",
+    "login",
+    "logout",
+    "signin",
+    "sign-in",
+    "register",
+    "registration",
+    "account",
+    "profile",
+    "settings",
+    "notifications",
+    "dashboard",
+    "home",
+    "cart",
+}
+
 # Nav/footer link text that should never be treated as a document, unless the
 # href is itself a direct downloadable file.
 DOCUMENT_REJECT_KEYWORDS = (
@@ -248,6 +271,18 @@ def _score_document_link(text: str, url: str, is_file: bool) -> tuple[float, str
         keyword in text_lower for keyword in DOCUMENT_REJECT_KEYWORDS
     ):
         return None
+
+    # Reject site roots and portal-navigation URLs (search pages, account
+    # areas). Keyword matching below also scans the URL, so without this a
+    # nav link like /solicitations/search scores as a "solicitation" hit.
+    if not is_file:
+        path_segments = [
+            segment for segment in urlparse(url_lower).path.split("/") if segment
+        ]
+        if not path_segments or any(
+            segment in NAVIGATION_URL_SEGMENTS for segment in path_segments
+        ):
+            return None
 
     haystack = f"{text_lower} {url_lower}"
     has_strong = any(keyword in haystack for keyword in STRONG_DOCUMENT_KEYWORDS)

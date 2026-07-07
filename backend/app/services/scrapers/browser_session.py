@@ -128,6 +128,19 @@ class PlaywrightNotInstalledError(RuntimeError):
     """Raised when a browser operation is attempted without Playwright."""
 
 
+class BrowserClosedError(RuntimeError):
+    """Raised when the visible browser window/context is closed mid-operation.
+
+    Typically the human closed the window; the caller should stop cleanly
+    instead of erroring on every remaining item.
+    """
+
+
+def _browser_gone(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "has been closed" in message or "context disposed" in message
+
+
 def playwright_available() -> bool:
     """True when the Playwright Python package is importable.
 
@@ -545,13 +558,13 @@ def download_document_links_headed(
             result["final_url"] = page.url
             _raise_if_session_expired(status, page.url, html, page_url)
 
-            candidates = [
-                c
-                for c in extract_document_candidates(
+            candidates = _filter_download_candidates(
+                extract_document_candidates(
                     html, page.url, allow_external=allow_external
-                )
-                if float(c.get("confidence_score") or 0) >= min_confidence
-            ]
+                ),
+                page.url,
+                min_confidence,
+            )
             result["candidates_found"] = len(candidates)
 
             click_targets = _configured_click_targets(page, download_click_selectors)
@@ -560,15 +573,21 @@ def download_document_links_headed(
             for candidate in download_queue[:max_downloads]:
                 result["downloads_attempted"] += 1
                 before_count = len(result["downloaded_files"])
-                if candidate.get("selector"):
-                    _download_by_selector(page, candidate, output_path, timeout_ms, result)
-                else:
-                    if is_document_url(candidate.get("url", "")):
-                        _download_by_browser_request(
-                            context, candidate, output_path, timeout_ms, result
-                        )
-                    if len(result["downloaded_files"]) == before_count:
-                        _download_by_click(page, context, candidate, output_path, timeout_ms, result)
+                try:
+                    if candidate.get("selector"):
+                        _download_by_selector(page, candidate, output_path, timeout_ms, result)
+                    else:
+                        if is_document_url(candidate.get("url", "")):
+                            _download_by_browser_request(
+                                context, candidate, output_path, timeout_ms, result
+                            )
+                        if len(result["downloaded_files"]) == before_count:
+                            _download_by_click(page, context, candidate, output_path, timeout_ms, result)
+                except BrowserClosedError:
+                    result["errors"].append(
+                        "Browser window was closed before all downloads completed; stopping."
+                    )
+                    break
         finally:
             _save_session_state(context, profile_dir)
             try:
@@ -577,6 +596,37 @@ def download_document_links_headed(
                 pass
 
     return result
+
+
+def _url_path_base(url: str) -> str:
+    """URL without query/fragment, for self-link comparison."""
+    parsed = urlparse(url or "")
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/").lower()
+
+
+def _filter_download_candidates(
+    candidates: list[dict], page_url: str, min_confidence: float
+) -> list[dict]:
+    """Drop self-links, duplicates, and low-confidence candidates.
+
+    Links back to the opportunity page itself (e.g. ?innerTabId=... tab
+    anchors) are navigation, not documents — clicking them navigates the
+    visible browser away and derails the remaining downloads.
+    """
+    page_base = _url_path_base(page_url)
+    seen_urls: set[str] = set()
+    filtered = []
+    for candidate in candidates:
+        if float(candidate.get("confidence_score") or 0) < min_confidence:
+            continue
+        url = candidate.get("url") or ""
+        if not url or url in seen_urls:
+            continue
+        if _url_path_base(url) == page_base:
+            continue
+        seen_urls.add(url)
+        filtered.append(candidate)
+    return filtered
 
 
 def _clean_selectors(selectors: list[str] | None) -> list[str]:
@@ -656,6 +706,8 @@ def _download_by_browser_request(
     except SessionExpiredError:
         raise
     except Exception as exc:  # noqa: BLE001 - try the click path next
+        if _browser_gone(exc):
+            raise BrowserClosedError(str(exc)) from exc
         result["errors"].append(f"{url}: browser request failed: {exc}")
 
 
@@ -671,6 +723,7 @@ def _download_by_click(
     if not url:
         return
     token = f"rfp-bidos-download-{abs(hash(url))}"
+    page_url_before = page.url
     try:
         found = page.evaluate(
             """({url, token}) => {
@@ -692,6 +745,15 @@ def _download_by_click(
         locator = page.locator(f'[data-rfp-bidos-download-target="{token}"]').first
         _save_click_download(page, locator, candidate, output_dir, timeout_ms, result)
     except Exception as exc:  # noqa: BLE001
+        if _browser_gone(exc):
+            raise BrowserClosedError(str(exc)) from exc
+        # A click that navigated instead of downloading leaves the page on the
+        # wrong URL for every later candidate — restore it before moving on.
+        try:
+            if page.url != page_url_before:
+                page.go_back(timeout=10_000)
+        except Exception:  # noqa: BLE001 - restore is best-effort
+            pass
         # Fallback: a click sometimes opens a document URL inline rather than a
         # download. Try the browser request path one last time.
         before_count = len(result["downloaded_files"])
@@ -713,12 +775,17 @@ def _download_by_selector(
         locator = page.locator(selector).nth(index)
         _save_click_download(page, locator, candidate, output_dir, timeout_ms, result)
     except Exception as exc:  # noqa: BLE001
+        if _browser_gone(exc):
+            raise BrowserClosedError(str(exc)) from exc
         result["errors"].append(f"{selector}: configured click failed: {exc}")
 
 
 def _save_click_download(page, locator, candidate: dict, output_dir: Path, timeout_ms: int, result: dict) -> None:
-    with page.expect_download(timeout=timeout_ms) as download_info:
-        locator.click(timeout=timeout_ms)
+    # Element clicks get a short leash: an invisible/hidden link should fail in
+    # seconds, not consume the whole page timeout retrying (observed on BidNet
+    # nav anchors). The download itself may still take up to timeout_ms.
+    with page.expect_download(timeout=min(timeout_ms, 30_000)) as download_info:
+        locator.click(timeout=min(timeout_ms, 10_000))
     download = download_info.value
     filename = download.suggested_filename or _filename_from_url(candidate.get("url")) or "document"
     path = _available_output_path(output_dir / filename)
