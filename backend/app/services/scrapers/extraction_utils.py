@@ -364,7 +364,20 @@ def extract_due_date(text: str) -> datetime | None:
 
 
 def extract_pre_bid_date(text: str) -> datetime | None:
-    return _date_after_keywords(text, ("pre-bid", "pre bid", "pre-proposal", "pre proposal"))
+    return _date_after_keywords(
+        text,
+        (
+            "pre-bid conference",
+            "pre bid conference",
+            "pre-bid meeting",
+            "pre bid meeting",
+            "pre-proposal conference",
+            "pre-bid",
+            "pre bid",
+            "pre-proposal",
+            "pre proposal",
+        ),
+    )
 
 
 def extract_q_and_a_deadline(text: str) -> datetime | None:
@@ -412,15 +425,96 @@ def extract_service_type(text: str) -> str | None:
     return None
 
 
+# Flattened detail pages run labeled fields together ("City of Carson
+# Location: Carson, CA Pre-bid conference: ..."). Trim a captured value at the
+# next "Label:" boundary, then strip any leading words of a multi-word label
+# that precede the colon-word (e.g. "Pre-bid" before "conference:").
+_LABEL_BOUNDARY = re.compile(r"\s+\S+:")
+_TRAILING_LABEL_FRAGMENT = re.compile(
+    r"\s+(?:pre-?bid|due|closing|bid|q\s*&\s*a|questions|estimated|posted"
+    r"|response|submission|contact|solicitation|category|status|department"
+    r"|location|organization|agency)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _trim_label_runon(value: str) -> str:
+    boundary = _LABEL_BOUNDARY.search(value)
+    if boundary:
+        value = value[: boundary.start()]
+    value = _TRAILING_LABEL_FRAGMENT.sub("", value)
+    return value.strip(" ,-")
+
+
+def extract_agency(text: str) -> str | None:
+    """The ISSUING agency named on a bid detail page.
+
+    Portals list many agencies' bids; the issuing agency is a labeled field on
+    the detail page ("Organization", "Agency", "Issued by", ...), not the
+    portal's own name.
+    """
+    match = re.search(
+        r"(?:issuing\s+agency|organization\s+name|organization|agency\s+name"
+        r"|\bagency|issued\s+by|purchasing\s+(?:entity|group|department)"
+        r"|\bbuyer|\bowner)\s*[:\-]\s*([^.;|\n\r]{3,100})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = normalize_space(match.group(1)).strip(" ,-")
+    if not value or value.lower().startswith(("http://", "https://", "www.")):
+        return None
+    value = _trim_label_runon(value)
+    return value or None
+
+
+def enrich_result_from_text(result, text: str, replace_agency_values=()) -> None:
+    """Fill a ScraperResult's missing breakdown fields from detail-page text.
+
+    Only empty fields are filled — mapped/list-page values win. The one
+    exception is agency: a value in ``replace_agency_values`` (the portal-name
+    fallback) is replaced by the issuing agency extracted from the page.
+    """
+    agency = extract_agency(text)
+    if agency and (not result.agency or result.agency in replace_agency_values):
+        result.agency = agency
+    if not result.solicitation_number:
+        result.solicitation_number = extract_solicitation_number(text)
+    if result.due_date is None:
+        result.due_date = extract_due_date(text)
+    if result.pre_bid_date is None:
+        result.pre_bid_date = extract_pre_bid_date(text)
+    if result.q_and_a_deadline is None:
+        result.q_and_a_deadline = extract_q_and_a_deadline(text)
+    if not result.location:
+        result.location = extract_location(text)
+    if not result.service_type:
+        result.service_type = extract_service_type(text)
+    if not result.contract_type:
+        result.contract_type = extract_contract_type(text)
+    if result.estimated_value is None:
+        result.estimated_value = extract_estimated_value(text)
+    normalized = normalize_space(text)
+    if normalized and (not result.description or result.description == result.title):
+        result.description = normalized[:600]
+    # Give the relevance/keyword filters the detail text to score against,
+    # not just the list-row snippet.
+    if normalized:
+        combined = f"{result.raw_text or ''} {normalized}".strip()
+        result.raw_text = combined[:4000]
+
+
 def extract_location(text: str) -> str | None:
     match = re.search(
         r"(?:location|place of performance|work location|county|city)\s*[:#-]\s*([^.;\n\r]{3,80})",
         text,
         flags=re.IGNORECASE,
     )
-    if match:
-        return normalize_space(match.group(1)).strip(" ,")
-    return None
+    if not match:
+        return None
+    value = _trim_label_runon(normalize_space(match.group(1)).strip(" ,"))
+    return value or None
 
 
 def extract_estimated_value(text: str) -> float | None:

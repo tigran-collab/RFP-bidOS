@@ -94,3 +94,64 @@ def test_parse_date_accepts_current_dated_value():
     parsed = parse_date("06/30/2026")
     assert parsed is not None
     assert (parsed.year, parsed.month, parsed.day) == (2026, 6, 30)
+
+
+# --- issuing-agency extraction + detail enrichment ---------------------------
+def test_extract_agency_labeled_fields():
+    from app.services.scrapers.extraction_utils import extract_agency
+
+    assert extract_agency("Organization: City of Carson") == "City of Carson"
+    assert extract_agency("Agency: County of Kern Purchasing") == "County of Kern Purchasing"
+    assert extract_agency("Issued by: Los Angeles Metro") == "Los Angeles Metro"
+
+
+def test_extract_agency_stops_at_next_label():
+    from app.services.scrapers.extraction_utils import extract_agency
+
+    text = "Organization: City of Carson Location: Carson, CA Due Date: 07/30/2026"
+    assert extract_agency(text) == "City of Carson"
+
+
+def test_extract_agency_none_without_label():
+    from app.services.scrapers.extraction_utils import extract_agency
+
+    assert extract_agency("Security guard services for the city") is None
+
+
+def test_enrich_result_fills_only_missing_fields():
+    from app.services.scrapers.base import ScraperResult
+    from app.services.scrapers.extraction_utils import enrich_result_from_text
+
+    result = ScraperResult(
+        title="Guard Services RFP",
+        agency="BidNet Direct",
+        solicitation_number="RFP-2026-001",
+        description="Guard Services RFP",
+    )
+    text = (
+        "Organization: City of Carson Location: Carson, CA "
+        "Solicitation Number: SHOULD-NOT-WIN-1 Estimated value: $99,000 "
+        "unarmed security guard services, fixed price"
+    )
+    enrich_result_from_text(result, text, replace_agency_values={"BidNet Direct"})
+
+    assert result.agency == "City of Carson"
+    assert result.solicitation_number == "RFP-2026-001"
+    assert result.location == "Carson, CA"
+    assert result.estimated_value == 99000.0
+    assert result.service_type == "Security services"
+    assert result.contract_type == "Fixed price"
+    assert result.description != "Guard Services RFP"
+
+
+def test_enrich_result_keeps_real_agency():
+    from app.services.scrapers.base import ScraperResult
+    from app.services.scrapers.extraction_utils import enrich_result_from_text
+
+    result = ScraperResult(title="Guard Services", agency="Example Transit Authority")
+    enrich_result_from_text(
+        result,
+        "Organization: City of Carson",
+        replace_agency_values={"BidNet Direct"},
+    )
+    assert result.agency == "Example Transit Authority"

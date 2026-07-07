@@ -55,6 +55,7 @@ from app.services.scrapers.browser_session import (
 )
 from app.services.scrapers.extraction_utils import (
     confidence_from_text,
+    enrich_result_from_text,
     extract_due_date,
     extract_solicitation_number,
     normalize_space,
@@ -169,18 +170,75 @@ class AuthenticatedBrowserAdapter:
             self.diagnostics.append(
                 f"Authenticated browser: mapped {len(results)} row(s) via field_map."
             )
-            return results
+        else:
+            # Fallback: reuse the generic table parser on the fetched HTML.
+            results = parse_tables(html, list_url, portal_url=list_url)
+            for result in results:
+                if not result.agency:
+                    result.agency = agency_fallback
+                result.extraction_method = "authenticated_browser_table"
+            self.diagnostics.append(
+                f"Authenticated browser: table-parser fallback mapped {len(results)} row(s)."
+            )
 
-        # Fallback: reuse the generic table parser on the fetched HTML.
-        results = parse_tables(html, list_url, portal_url=list_url)
-        for result in results:
-            if not result.agency:
-                result.agency = agency_fallback
-            result.extraction_method = "authenticated_browser_table"
-        self.diagnostics.append(
-            f"Authenticated browser: table-parser fallback mapped {len(results)} row(s)."
+        self._enrich_from_detail_pages(
+            results, config, profile_dir, fetch_headless, agency_fallback
         )
         return results
+
+    def _enrich_from_detail_pages(
+        self,
+        results: list[ScraperResult],
+        config: dict,
+        profile_dir: str,
+        fetch_headless: bool,
+        agency_fallback: str | None,
+    ) -> None:
+        """Visit each candidate's detail page and fill the breakdown fields.
+
+        List rows carry little beyond title/due date, and on multi-agency
+        portals the agency fallback is the PORTAL name — the issuing agency,
+        location, service/contract type, value, and description all live on
+        the detail page. Per-page failures are diagnostics, never fatal.
+        """
+        limit = int(config.get("detail_limit") or 10)
+        list_url = config.get("list_url")
+        replace_values = {value for value in (agency_fallback,) if value}
+        enriched = 0
+        for result in results:
+            if enriched >= limit:
+                self.diagnostics.append(
+                    f"Detail enrichment capped at {limit} page(s); "
+                    f"{len(results) - enriched} candidate(s) left unenriched."
+                )
+                break
+            url = result.detail_url or result.source_url
+            if not url or url == list_url:
+                continue
+            try:
+                detail_html = fetch_authenticated_html(
+                    url,
+                    profile_dir,
+                    wait_selector=config.get("detail_wait_selector"),
+                    timeout_seconds=self.timeout,
+                    headless=fetch_headless,
+                )
+            except SessionExpiredError as exc:
+                self.diagnostics.append(
+                    f"Detail enrichment stopped: session expired ({exc})"
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - enrich what we can
+                self.diagnostics.append(f"Detail enrichment failed for {url}: {exc}")
+                continue
+            text = BeautifulSoup(detail_html, "html.parser").get_text(" ", strip=True)
+            enrich_result_from_text(result, text, replace_agency_values=replace_values)
+            result.extraction_method = f"{result.extraction_method or 'authenticated_browser'}+detail"
+            enriched += 1
+        if enriched:
+            self.diagnostics.append(
+                f"Authenticated browser: enriched {enriched} candidate(s) from detail pages."
+            )
 
     def _parse_rows(
         self,

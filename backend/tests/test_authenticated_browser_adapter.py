@@ -65,6 +65,17 @@ ROW_CONFIG = {
 
 TABLE_CONFIG = {"list_url": "https://portal.example.com/bids", "agency": "Fallback Agency"}
 
+DETAIL_HTML = """
+<html><body>
+<h1>Armed Security Patrol RFP</h1>
+<div>Organization: City of Carson</div>
+<div>Location: Carson, CA</div>
+<div>Pre-bid conference: 07/15/2026 10:00 AM</div>
+<div>Estimated value: $250,000</div>
+<p>The City seeks armed security guard services on a fixed price basis.</p>
+</body></html>
+"""
+
 
 def make_source(config, source_id=42):
     return SimpleNamespace(
@@ -89,13 +100,10 @@ def test_can_handle_only_authenticated_browser():
 
 def test_row_field_map_extraction(monkeypatch):
     _force_playwright(monkeypatch)
-    captured = {}
+    fetched = []
 
     def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, **kwargs):
-        captured["page_url"] = page_url
-        captured["wait_selector"] = wait_selector
-        captured["headless"] = headless
-        captured.update(kwargs)
+        fetched.append({"page_url": page_url, "wait_selector": wait_selector})
         return ROW_HTML
 
     monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
@@ -113,9 +121,11 @@ def test_row_field_map_extraction(monkeypatch):
     # Row link resolved against list_url.
     assert bid.source_url == "https://portal.example.com/bids/RFP-2026-014"
     assert bid.detail_url == bid.source_url
-    assert bid.extraction_method == "authenticated_browser_row"
-    assert captured["wait_selector"] == "table.bids"
-    assert captured["page_url"] == "https://portal.example.com/bids"
+    assert bid.extraction_method == "authenticated_browser_row+detail"
+    assert fetched[0]["wait_selector"] == "table.bids"
+    assert fetched[0]["page_url"] == "https://portal.example.com/bids"
+    # The candidate's detail page was visited for enrichment.
+    assert fetched[1]["page_url"] == bid.detail_url
 
 
 def test_table_parser_fallback(monkeypatch):
@@ -134,8 +144,54 @@ def test_table_parser_fallback(monkeypatch):
     assert bid.solicitation_number == "IFB-2026-100"
     # agency was not in the table, so the fallback applies the config agency.
     assert bid.agency == "Fallback Agency"
-    assert bid.extraction_method == "authenticated_browser_table"
+    assert bid.extraction_method == "authenticated_browser_table+detail"
     assert any("table-parser fallback" in d for d in adapter.diagnostics)
+
+
+def test_detail_enrichment_fills_breakdown_fields(monkeypatch):
+    _force_playwright(monkeypatch)
+
+    def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, **kwargs):
+        return TABLE_HTML if page_url == TABLE_CONFIG["list_url"] else DETAIL_HTML
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(TABLE_CONFIG))
+
+    assert len(results) == 1
+    bid = results[0]
+    # The portal-name fallback is replaced by the ISSUING agency on the page.
+    assert bid.agency == "City of Carson"
+    assert bid.location == "Carson, CA"
+    assert bid.pre_bid_date is not None and bid.pre_bid_date.month == 7
+    assert bid.estimated_value == 250000.0
+    assert bid.service_type == "Security services"
+    assert bid.contract_type == "Fixed price"
+    assert bid.description and bid.description != bid.title
+    # List-page values are kept, not overwritten by the detail page.
+    assert bid.solicitation_number == "IFB-2026-100"
+    assert bid.due_date is not None and bid.due_date.month == 7 and bid.due_date.day == 30
+    assert any("enriched 1 candidate" in d for d in adapter.diagnostics)
+
+
+def test_detail_enrichment_stops_on_session_expiry(monkeypatch):
+    _force_playwright(monkeypatch)
+    calls = []
+
+    def fake_fetch(page_url, profile_dir, **kwargs):
+        calls.append(page_url)
+        if page_url == TABLE_CONFIG["list_url"]:
+            return TABLE_HTML
+        raise SessionExpiredError("expired mid-enrichment")
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(TABLE_CONFIG))
+
+    # Candidates are still returned; enrichment stops with a diagnostic.
+    assert len(results) == 1
+    assert results[0].agency == "Fallback Agency"
+    assert any("session expired" in d.lower() for d in adapter.diagnostics)
 
 
 def test_missing_list_url_returns_empty(monkeypatch):
