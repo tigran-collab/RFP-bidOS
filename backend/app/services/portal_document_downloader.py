@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 
 from app.config import BROWSER_PROFILE_ROOT, DOWNLOAD_ROOT
 from app.models import Document, Opportunity, SourceConfig
+from app.services import credential_store
 from app.services.downloader import (
     resolve_downloaded_document_path,
     sha256_file,
@@ -21,6 +22,7 @@ from app.services.scrapers.browser_session import (
     PlaywrightNotInstalledError,
     SessionExpiredError,
 )
+from app.services.scrapers.portal_templates import DEFAULT_LOGIN_SUCCESS_SUBSTRINGS
 
 SUPPORTED_PORTAL_SOURCE_TYPES = {"planetbids", "authenticated_browser"}
 
@@ -60,8 +62,8 @@ def download_portal_documents_headed(opportunity_id: int, session: Session) -> d
         shutil.rmtree(temp_dir, ignore_errors=True)
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        browser_result = browser_session.download_document_links_headed(
+    def _run_download() -> dict:
+        return browser_session.download_document_links_headed(
             page_url,
             profile_dir,
             str(temp_dir),
@@ -74,12 +76,29 @@ def download_portal_documents_headed(opportunity_id: int, session: Session) -> d
             settle_ms=int(download_config.get("settle_ms") or 1500),
             allow_external=bool(download_config.get("allow_external", False)),
         )
+
+    try:
+        browser_result = _run_download()
     except PlaywrightNotInstalledError as exc:
         summary["errors"].append(str(exc))
         return summary
-    except SessionExpiredError as exc:
-        summary["errors"].append(f"Portal session unavailable: {exc}")
-        return summary
+    except SessionExpiredError:
+        # Effortless path: run assisted login (visible window, credentials
+        # pre-filled from the OS keychain, human completes any MFA/CAPTCHA),
+        # then retry the download once in the fresh session.
+        if not _auto_login(source, config, profile_dir, summary):
+            return summary
+        summary["login_performed"] = True
+        try:
+            browser_result = _run_download()
+        except SessionExpiredError as exc:
+            summary["errors"].append(
+                f"Portal session still unavailable after login: {exc}"
+            )
+            return summary
+        except Exception as exc:  # noqa: BLE001 - surface a clear operator error
+            summary["errors"].append(f"Headed portal download failed: {exc}")
+            return summary
     except Exception as exc:  # noqa: BLE001 - surface a clear operator error
         summary["errors"].append(f"Headed portal download failed: {exc}")
         return summary
@@ -94,6 +113,66 @@ def download_portal_documents_headed(opportunity_id: int, session: Session) -> d
     session.commit()
     shutil.rmtree(temp_dir, ignore_errors=True)
     return summary
+
+
+def _login_url_for_source(source: SourceConfig, config: dict) -> str | None:
+    if source.login_url:
+        return source.login_url
+    for key in ("login_url", "list_url"):
+        value = config.get(key)
+        if value and not str(value).startswith("TODO"):
+            return value
+    return source.base_url
+
+
+def _auto_login(
+    source: SourceConfig, config: dict, profile_dir: str, summary: dict
+) -> bool:
+    """Assisted login with keychain-prefilled credentials; True on success.
+
+    The human still completes the login (and any MFA/CAPTCHA) in the visible
+    window — this only removes the trip to the Portals tab. With a
+    success_url_substring the window closes itself once logged in.
+    """
+    login_url = _login_url_for_source(source, config)
+    if not login_url:
+        summary["errors"].append(
+            "Portal session expired and the source has no login URL. "
+            "Set one on the Portals tab, then retry."
+        )
+        return False
+
+    username = source.credential_username
+    password = None
+    if username and source.credential_secret_ref:
+        password = credential_store.get_password(
+            source.credential_secret_ref, username
+        )
+
+    success_substring = config.get("success_url_substring") or (
+        DEFAULT_LOGIN_SUCCESS_SUBSTRINGS.get((source.portal_type or "").lower())
+    )
+    try:
+        result = browser_session.assisted_login(
+            login_url,
+            profile_dir,
+            prefill_username=username,
+            prefill_password=password,
+            success_url_substring=success_substring,
+            timeout_seconds=int(config.get("login_timeout_seconds") or 240),
+        )
+    except Exception as exc:  # noqa: BLE001 - surface a clear operator error
+        summary["errors"].append(f"Assisted login failed: {exc}")
+        return False
+    finally:
+        del password
+
+    if not result.get("ok"):
+        summary["errors"].append(
+            result.get("message") or "Login did not complete; try again."
+        )
+        return False
+    return True
 
 
 def _source_for_opportunity(
@@ -251,6 +330,7 @@ def _empty_summary() -> dict:
         "skipped_count": 0,
         "candidates_found": 0,
         "downloads_attempted": 0,
+        "login_performed": False,
         "files": [],
         "errors": [],
     }

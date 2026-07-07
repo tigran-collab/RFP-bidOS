@@ -33,7 +33,10 @@ from app.db import engine
 from app.models import SourceConfig
 from app.schemas import SourceConfigRead
 from app.services import credential_store
-from app.services.scrapers.portal_templates import list_templates
+from app.services.scrapers.portal_templates import (
+    DEFAULT_LOGIN_SUCCESS_SUBSTRINGS,
+    list_templates,
+)
 from app.services.source_credentials import (
     CREDENTIAL_TYPE_KEYRING,
     get_source_auth_status,
@@ -323,6 +326,10 @@ def start_portal_login(source_id: int) -> dict:
                 config = {}
             if isinstance(config, dict):
                 success_substr = config.get("success_url_substring")
+        if not success_substr:
+            success_substr = DEFAULT_LOGIN_SUCCESS_SUBSTRINGS.get(
+                (source.portal_type or "").lower()
+            )
 
     if not browser_session.playwright_available():
         return _set_login_state(

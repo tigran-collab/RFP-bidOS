@@ -334,10 +334,16 @@ export default function OpportunityDetail({ opportunityId }) {
   async function runPortalDownload() {
     try {
       setPortalDownloading(true);
+      setActionMessage(
+        "Opening the portal in a browser window. If a login page appears, " +
+          "complete the sign-in — the download continues automatically.",
+      );
+      setActionError("");
       const result = await downloadOpportunityPortalDocuments(opportunityId);
       setDocuments(await getOpportunityDocuments(opportunityId));
+      const loginNote = result.login_performed ? "signed in, " : "";
       setActionMessage(
-        `Headed portal download: ${result.candidates_found} candidates, ` +
+        `Portal download: ${loginNote}${result.candidates_found} candidates, ` +
           `${result.downloads_attempted} attempted, ` +
           `${result.downloaded_count} downloaded, ${result.skipped_count} skipped.`
       );

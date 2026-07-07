@@ -22,6 +22,14 @@ import copy
 _TODO_URL = "TODO_REPLACE_WITH_LIST_URL"
 _TODO_SELECTOR = "TODO_REPLACE_WITH_CSS_SELECTOR"
 
+# Post-login URL markers per portal type: when the browser lands on a URL
+# containing this substring, assisted login is complete and the window can
+# close itself. Used as a fallback when a source's config_json does not set
+# success_url_substring (e.g. sources created before this was added).
+DEFAULT_LOGIN_SUCCESS_SUBSTRINGS: dict[str, str] = {
+    "bidnet": "/private/",
+}
+
 
 PORTAL_TEMPLATES: dict[str, dict] = {
     "planetbids": {
@@ -60,6 +68,7 @@ PORTAL_TEMPLATES: dict[str, dict] = {
         "config_json": {
             "list_url": _TODO_URL,
             "wait_selector": _TODO_SELECTOR,
+            "success_url_substring": "/private/",
             "agency": "BidNet Direct",
             "row_selector": _TODO_SELECTOR,
             "field_map": {
