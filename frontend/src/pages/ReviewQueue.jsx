@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  aiEvaluateOpportunity,
-  downloadOpportunityDocuments,
-  downloadOpportunityPortalDocuments,
-  extractOpportunityRequirements,
   getReviewQueue,
   prioritizeAll,
   reviewOpportunity,
@@ -113,28 +109,6 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     } catch {
       setError(`Failed to update opportunity ${id}.`);
       return false;
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function runAction(id, action, label) {
-    try {
-      setBusyId(id);
-      const result = await action(id);
-      const summary =
-        result?.downloaded_count !== undefined
-          ? result?.downloads_attempted !== undefined
-            ? `${result.candidates_found ?? 0} candidates, ${result.downloads_attempted} attempted, ${result.downloaded_count} downloaded`
-            : `${result.documents_discovered ?? 0} discovered, ${result.downloaded_count} downloaded, ${result.skipped_count} skipped`
-          : result?.requirements_count !== undefined
-            ? `${result.requirements_count} requirements`
-            : "done";
-      setMessage(`Opportunity ${id}: ${label} (${summary})`);
-      setError("");
-      await loadQueue();
-    } catch (err) {
-      setError(err.message || `Failed to run ${label} for opportunity ${id}.`);
     } finally {
       setBusyId(null);
     }
@@ -368,8 +342,8 @@ export default function ReviewQueue({ onOpenOpportunity }) {
               <th>Bid Score</th>
               <th>Relevance</th>
               <th>AI Rec</th>
-              <th>Review</th>
-              <th>Priority</th>
+              <th>Status</th>
+              <th>Set Priority</th>
               <th>Next Action</th>
               <th>Actions</th>
               <th>Notes</th>
@@ -463,88 +437,24 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                     >
                       Run Pursuit Prep
                     </button>
-                    <button
-                      type="button"
+                    <select
+                      value={opp.review_status || "New"}
                       disabled={busyId === opp.id}
-                      onClick={() =>
-                        applyReview(opp.id, { review_status: "Pursue" }, "Pursue")
-                      }
-                    >
-                      Pursue
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
+                      aria-label={`Set review status for ${opp.title}`}
+                      onChange={(event) =>
                         applyReview(
                           opp.id,
-                          { review_status: "Do Not Pursue" },
-                          "Do Not Pursue",
+                          { review_status: event.target.value },
+                          event.target.value,
                         )
                       }
                     >
-                      Do Not Pursue
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
-                        applyReview(opp.id, { review_status: "Watchlist" }, "Watchlist")
-                      }
-                    >
-                      Watchlist
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
-                        applyReview(opp.id, { review_status: "Archived" }, "Archived")
-                      }
-                    >
-                      Archive
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
-                        runAction(opp.id, downloadOpportunityDocuments, "Download Docs")
-                      }
-                    >
-                      Download Docs
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
-                        runAction(
-                          opp.id,
-                          downloadOpportunityPortalDocuments,
-                          "Headed Portal Docs",
-                        )
-                      }
-                    >
-                      Portal Docs
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() => runAction(opp.id, aiEvaluateOpportunity, "AI Eval")}
-                    >
-                      Run AI Eval
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === opp.id}
-                      onClick={() =>
-                        runAction(
-                          opp.id,
-                          extractOpportunityRequirements,
-                          "Extract Requirements",
-                        )
-                      }
-                    >
-                      Extract Requirements
-                    </button>
+                      {REVIEW_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </td>
                 <td>

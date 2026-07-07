@@ -302,6 +302,39 @@ h3 {
   margin: 0 0 1.25rem;
 }
 
+/* Grouped secondary actions (opportunity detail toolbar) */
+.action-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.action-group-label {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 0.25rem;
+}
+
+.action-group .secondary-button {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+}
+
 .primary-button {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -480,6 +513,11 @@ textarea {
   color: var(--text);
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+.review-actions select {
+  font-size: 0.74rem;
+  padding: 0.25rem 0.4rem;
 }
 
 .review-notes {

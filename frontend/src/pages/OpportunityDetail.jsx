@@ -4,7 +4,6 @@ import {
   aiEvaluateOpportunity,
   attachManualDocumentUrl,
   downloadDocument,
-  discoverOpportunityDocuments,
   downloadOpportunityDocuments,
   downloadOpportunityPortalDocuments,
   extractOpportunityLogistics,
@@ -117,7 +116,6 @@ export default function OpportunityDetail({ opportunityId }) {
   const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
-  const [discovering, setDiscovering] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [pursuitResult, setPursuitResult] = useState(null);
   const [downloading, setDownloading] = useState(false);
@@ -313,23 +311,6 @@ export default function OpportunityDetail({ opportunityId }) {
     }
   }
 
-  async function runDiscover() {
-    try {
-      setDiscovering(true);
-      const result = await discoverOpportunityDocuments(opportunityId);
-      setDocuments(await getOpportunityDocuments(opportunityId));
-      setActionMessage(
-        `${result.documents_discovered} new document links discovered, ` +
-          `${result.documents_skipped} already known.`,
-      );
-      setActionError(result.errors?.length ? result.errors.join("; ") : "");
-    } catch {
-      setActionError("Failed to discover documents. Is the backend running?");
-    } finally {
-      setDiscovering(false);
-    }
-  }
-
   async function runDownload() {
     try {
       setDownloading(true);
@@ -472,7 +453,6 @@ export default function OpportunityDetail({ opportunityId }) {
   const latestEvaluation = evaluations[0] || null;
   const busy =
     scoring ||
-    discovering ||
     preparing ||
     downloading ||
     portalDownloading ||
@@ -488,14 +468,6 @@ export default function OpportunityDetail({ opportunityId }) {
       <h1>{opportunity.title}</h1>
       <div className="page-actions">
         <button
-          className="secondary-button"
-          type="button"
-          disabled={busy || savingEdit}
-          onClick={editing ? () => setEditing(false) : startEdit}
-        >
-          {editing ? "Cancel Edit" : "Edit Opportunity"}
-        </button>
-        <button
           className="primary-button"
           type="button"
           disabled={busy}
@@ -504,77 +476,85 @@ export default function OpportunityDetail({ opportunityId }) {
           {preparing ? "Running Pursuit Prep..." : "Run Pursuit Prep"}
         </button>
         <button
-          className="primary-button"
+          className="secondary-button"
           type="button"
-          disabled={busy}
-          onClick={runScore}
+          disabled={busy || savingEdit}
+          onClick={editing ? () => setEditing(false) : startEdit}
         >
-          {scoring ? "Scoring..." : "Run Bid/No-Bid Score"}
+          {editing ? "Cancel Edit" : "Edit Opportunity"}
         </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runExtractLogistics}
-        >
-          {extractingLogistics ? "Extracting Logistics..." : "Extract Logistics"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runQA}
-        >
-          {runningQA ? "Running QA..." : "Run Logistics QA"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runDiscover}
-        >
-          {discovering ? "Discovering..." : "Discover Documents"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runDownload}
-        >
-          {downloading ? "Downloading..." : "Download Documents"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runPortalDownload}
-        >
-          {portalDownloading ? "Opening Portal..." : "Headed Portal Download"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runParse}
-        >
-          {parsing ? "Parsing..." : "Parse Documents"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runAiEvaluation}
-        >
-          {aiEvaluating ? "Evaluating..." : "Run Local AI Evaluation"}
-        </button>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={busy}
-          onClick={runRequirementExtraction}
-        >
-          {extracting ? "Extracting..." : "Extract Requirements"}
-        </button>
+      </div>
+      <div className="action-groups">
+        <div className="action-group">
+          <span className="action-group-label">Documents</span>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runDownload}
+          >
+            {downloading ? "Downloading..." : "Download Documents"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runPortalDownload}
+          >
+            {portalDownloading ? "Opening Portal..." : "Portal Download"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runParse}
+          >
+            {parsing ? "Parsing..." : "Parse Documents"}
+          </button>
+        </div>
+        <div className="action-group">
+          <span className="action-group-label">Analysis</span>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runAiEvaluation}
+          >
+            {aiEvaluating ? "Evaluating..." : "Local AI Evaluation"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runRequirementExtraction}
+          >
+            {extracting ? "Extracting..." : "Extract Requirements"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runExtractLogistics}
+          >
+            {extractingLogistics ? "Extracting..." : "Extract Logistics"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runQA}
+          >
+            {runningQA ? "Running QA..." : "Logistics QA"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={runScore}
+          >
+            {scoring ? "Scoring..." : "Bid/No-Bid Score"}
+          </button>
+        </div>
       </div>
       {actionMessage ? <p>{actionMessage}</p> : null}
       {actionError ? <p className="error-text">{actionError}</p> : null}
@@ -737,7 +717,7 @@ export default function OpportunityDetail({ opportunityId }) {
       <div className="pursuit-result">
         <div className="page-actions">
           <button
-            className="primary-button"
+            className="secondary-button"
             type="button"
             disabled={busy}
             onClick={runAiSummary}
@@ -867,8 +847,8 @@ export default function OpportunityDetail({ opportunityId }) {
       </div>
       {!documents.length ? (
         <p>
-          No documents found. Use Discover Documents to find document links on the
-          source page, then Download Documents to fetch them.
+          No documents found. Use Download Documents to find and fetch document
+          links from the source page, or Portal Download for login portals.
         </p>
       ) : (
         <table className="data-table">
