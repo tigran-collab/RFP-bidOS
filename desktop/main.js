@@ -7,6 +7,7 @@ const path = require("node:path");
 const APP_TITLE = "RFP BidOS";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_MODEL = "qwen3:8b";
+const OLLAMA_MODEL_BASE = OLLAMA_MODEL.split(":")[0];
 const OLLAMA_START_TIMEOUT_MS = 30000;
 const BACKEND_START_TIMEOUT_MS = 30000;
 const FRONTEND_START_TIMEOUT_MS = 45000;
@@ -14,6 +15,11 @@ const BACKEND_URL = "http://127.0.0.1:8000";
 const FRONTEND_URL = "http://localhost:5173";
 
 const desktopDir = __dirname;
+// TODO(packaging): this assumes a dev git checkout — the backend venv and
+// frontend node_modules live one directory up. A real packaged app must detect
+// app.isPackaged and resolve appRoot to process.resourcesPath, with backend +
+// frontend shipped via electron-builder extraResources (see desktop/package.json
+// "//packaging-todo"). Until then the launcher is a dev-mode convenience only.
 const appRoot = path.resolve(desktopDir, "..");
 const backendDir = path.join(appRoot, "backend");
 const frontendDir = path.join(appRoot, "frontend");
@@ -314,22 +320,22 @@ function modelNames(tags) {
 }
 
 function hasRequiredModel(names) {
+  // Accept the exact tag, the "-latest" alias, or any tag sharing the model's
+  // base name — e.g. a legit `qwen3` pulled as `qwen3:latest` still counts.
   return names.some((name) => {
     const normalized = String(name).toLowerCase();
-    return normalized === OLLAMA_MODEL || normalized === `${OLLAMA_MODEL}-latest` || normalized === "qwen3";
+    if (normalized === OLLAMA_MODEL || normalized === `${OLLAMA_MODEL}-latest`) {
+      return true;
+    }
+    return normalized.split(":")[0] === OLLAMA_MODEL_BASE;
   });
 }
 
 async function ensureBackend() {
   setStep("Starting backend", "running", "Checking FastAPI backend...");
-  const backendHealthReady = await urlReady(`${BACKEND_URL}/health`);
-  if (backendHealthReady && await urlReady(`${BACKEND_URL}/ai/chat/status`)) {
+  if (await urlReady(`${BACKEND_URL}/health`)) {
     setStep("Starting backend", "done", "Backend is already running.");
     return;
-  }
-  if (backendHealthReady) {
-    setStep("Starting backend", "failed", "Another backend is running on port 8000.");
-    throw new Error("A backend is already running on 127.0.0.1:8000, but it does not have the Local AI Chat endpoints. Stop the old backend process and relaunch RFP BidOS.");
   }
 
   started.backend = spawnLogged("Backend", pythonPath(), [

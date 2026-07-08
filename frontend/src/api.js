@@ -44,6 +44,17 @@ export function getOperationsDashboard() {
   return request("/dashboard/operations");
 }
 
+export function getDashboardDigest(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      query.append(key, value);
+    }
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request(`/dashboard/digest${suffix}`);
+}
+
 export function getAiStatus() {
   return request("/ai/status");
 }
@@ -116,10 +127,6 @@ export function getOpportunityDocuments(id) {
   return request(`/opportunities/${id}/documents`);
 }
 
-export function discoverOpportunityDocuments(id) {
-  return request(`/opportunities/${id}/discover-documents`, { method: "POST" });
-}
-
 export function downloadOpportunityDocuments(id) {
   return request(`/opportunities/${id}/download-documents`, { method: "POST" });
 }
@@ -176,20 +183,8 @@ export function updateSource(id, payload) {
   return jsonRequest(`/sources/${id}`, payload, "PATCH");
 }
 
-export function getSourceAuthStatus(id) {
-  return request(`/sources/${id}/auth-status`);
-}
-
-export function checkSourceAuthStatus(id) {
-  return request(`/sources/${id}/auth-status/check`, { method: "POST" });
-}
-
 export function scrapeEnabledSources() {
   return request("/sources/scrape-enabled", { method: "POST" });
-}
-
-export function getSourceScraperCapabilities(id) {
-  return request(`/sources/${id}/scraper-capabilities`);
 }
 
 export function seedSources() {

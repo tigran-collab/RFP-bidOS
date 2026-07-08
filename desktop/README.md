@@ -2,6 +2,14 @@
 
 This folder contains the Electron launcher for the existing RFP BidOS FastAPI backend and React/Vite frontend. It does not replace either app.
 
+> **This is a dev-mode convenience, not a packaged distributable.** The launcher
+> requires a git checkout in which the backend virtual environment
+> (`backend/.venv`) and the frontend dependencies (`frontend/node_modules`) are
+> already installed. On launch it starts and orchestrates those local dev
+> servers (Ollama, uvicorn, Vite) — it does not embed them. The `package:*`
+> commands below currently produce only the launcher shell and are **not** a
+> working standalone app (see "Packaging").
+
 ## One-Command Startup
 
 The desktop launcher is the startup manager for local RFP BidOS development. It checks or starts Ollama, checks the local model, starts the FastAPI backend, starts the Vite frontend, then opens the Electron window.
@@ -131,6 +139,19 @@ Place icon files in `desktop/assets/`:
 - `icon.ico` for Windows packaging.
 
 ## Packaging
+
+> **Not a working distributable yet.** These `electron-builder` targets bundle
+> only the launcher shell (`main.js`, `status.html`, `status-preload.js`, and
+> `assets/`). They do **not** include the Python backend, the backend venv, or
+> the frontend/`node_modules`, and `main.js` resolves its app root to the repo
+> parent directory (`path.resolve(__dirname, "..")`) — so a packaged build will
+> not find the backend or frontend at runtime. Use the launcher from a git
+> checkout instead (see "One-Command Startup").
+>
+> Making this a real installable would require shipping `backend/` and
+> `frontend/` via `extraResources`, detecting `app.isPackaged` to resolve the
+> app root to `process.resourcesPath`, and bundling a Python runtime plus a
+> built frontend. That work is not done here.
 
 Packaging uses `electron-builder`.
 

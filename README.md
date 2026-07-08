@@ -31,12 +31,15 @@ python -m app.cli seed-demo
 
 ## Frontend Setup
 
+Install dependencies. The app runs from the Vite **dev server** (`npm run dev`,
+see "Run Manually" below) — you do not need to build or serve a `dist/` bundle
+to use it. `npm run build` is only needed to verify a production build compiles.
+
 macOS:
 
 ```bash
 cd frontend
 npm install
-npm run build
 ```
 
 Windows:
@@ -44,7 +47,6 @@ Windows:
 ```cmd
 cd frontend
 npm.cmd install
-npm.cmd run build
 ```
 
 ## Run Manually
@@ -123,6 +125,13 @@ ollama pull qwen3:8b
 ```
 
 The Electron launcher checks Ollama, starts local backend/frontend development servers, opens a desktop window titled `RFP BidOS`, and loads `http://localhost:5173`. It stops only the processes it started. It does not auto-pull Ollama models.
+
+> **Dev-mode convenience, not a distributable.** The launcher expects a git
+> checkout with the backend venv (`backend/.venv`) and frontend dependencies
+> (`frontend/node_modules`) already built — it starts and orchestrates those
+> local dev servers. The `electron-builder` packaging targets do **not** produce
+> a standalone installable app yet (they bundle only the launcher shell, not the
+> Python backend or the frontend). See `desktop/README.md` for details.
 
 Icon files can be placed in `desktop/assets/`:
 
@@ -233,29 +242,6 @@ python -m app.cli ai-summarize-all --limit 25 --status new --force
 - Endpoint: `POST /opportunities/{id}/ai-summary` (returns `{ok, summary, message}`;
   the saved summary is also returned on the opportunity as `ai_summary` / `ai_summary_at`).
 - In-app: a "Generate AI Summary" button on the Opportunity Detail page.
-
-## Local AI Chat
-
-The app includes a simple **Local AI Chat** page and an opportunity-aware chat panel on Opportunity Detail. Chat uses local Ollama only with the default model `qwen3:8b`; it does not use OpenAI APIs or cloud AI.
-
-Local AI Chat can use read-only summarized app context, including current opportunities, deadlines, scores, review statuses, requirements, and logistics. It can analyze, rank, compare, and explain opportunities, but it cannot modify records, run scrapers, download documents, parse files, extract requirements, submit bids, or trigger app actions.
-
-Setup:
-
-```bash
-ollama pull qwen3:8b
-ollama serve
-```
-
-Then run the backend and frontend normally. The chat status endpoint checks `http://127.0.0.1:11434` and reports whether `qwen3:8b` is available.
-
-If Ollama is unavailable, the UI shows:
-
-```text
-Local AI model is not available. Start Ollama and make sure qwen3:8b is installed.
-```
-
-Chat answers are based only on available app data and local model reasoning. Verify official solicitation documents before acting.
 
 ## Parsing
 

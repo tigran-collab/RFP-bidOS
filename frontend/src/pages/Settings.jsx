@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import LoadError from "../components/LoadError.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import {
   deleteNotionConfig,
@@ -48,8 +49,8 @@ export default function Settings() {
       setStatus(loaded);
       setDatabaseId(loaded?.database_id || "");
       setError("");
-    } catch {
-      setError(loadError);
+    } catch (err) {
+      setError(err.message || loadError);
     } finally {
       setLoading(false);
     }
@@ -208,8 +209,12 @@ export default function Settings() {
           ) : null}
         </div>
 
-        {message ? <p className="muted-text notice-text">{message}</p> : null}
-        {error ? <p className="error-text">{error}</p> : null}
+        {message ? (
+          <p className="muted-text notice-text" role="status" aria-live="polite">
+            {message}
+          </p>
+        ) : null}
+        {error ? <LoadError message={error} onRetry={loadStatus} /> : null}
 
         {syncResult ? (
           <div className="pursuit-result">

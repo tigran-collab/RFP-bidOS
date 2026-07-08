@@ -4,7 +4,6 @@ const { spawnSync } = require("node:child_process");
 
 const required = [
   "main.js",
-  "preload.js",
   "status.html",
   "status-preload.js",
   "package.json",
@@ -19,7 +18,7 @@ for (const file of required) {
   }
 }
 
-for (const file of ["main.js", "preload.js", "status-preload.js"]) {
+for (const file of ["main.js", "status-preload.js"]) {
   const fullPath = path.join(__dirname, "..", file);
   const result = spawnSync(process.execPath, ["--check", fullPath], {
     encoding: "utf8",

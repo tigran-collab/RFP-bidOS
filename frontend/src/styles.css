@@ -480,6 +480,13 @@ textarea {
 }
 
 /* ---- Review queue ---- */
+.review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
 .review-filters {
   display: flex;
   gap: 1rem;
@@ -544,6 +551,65 @@ textarea {
 .review-notes input {
   flex: 1;
   min-width: 100px;
+}
+
+/* ---- Load error ---- */
+.load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.15rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--danger-soft);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+}
+.load-error .error-text {
+  margin: 0;
+}
+
+/* ---- Daily digest ---- */
+.digest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.digest-bucket {
+  padding: 1rem 1.15rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.digest-bucket-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.digest-bucket-head span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.digest-bucket-head strong {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.digest-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+.digest-list li {
+  margin-bottom: 0.35rem;
 }
 
 /* ---- Result callouts ---- */
@@ -630,22 +696,6 @@ textarea {
   text-decoration: none;
 }
 
-.credential-grid {
-  display: grid;
-  gap: 0.5rem;
-  min-width: 220px;
-}
-.credential-grid label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.credential-grid input[type="text"],
-.credential-grid select,
-.credential-grid textarea {
-  width: 100%;
-}
-
 /* ---- Status badges (variants set by StatusBadge.jsx) ---- */
 .status-badge {
   display: inline-flex;
@@ -688,12 +738,6 @@ textarea {
   background: var(--accent-soft);
   color: var(--accent-bright);
   border-color: rgba(129, 140, 248, 0.3);
-}
-
-/* legacy hook used by the AI-status indicator */
-.status-unavailable {
-  background: var(--danger-soft);
-  color: var(--danger);
 }
 
 /* ---- Detail grid ---- */

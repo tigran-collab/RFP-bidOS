@@ -152,3 +152,44 @@ export function buildOpportunityPayload(values) {
   payload.pre_bid_mandatory = Boolean(values.pre_bid_mandatory);
   return payload;
 }
+
+// Fields that are nullable on the backend (OpportunityUpdate) and safe to clear
+// explicitly. Editing sends `null` for any of these that the user emptied out,
+// so a cleared value actually persists through the exclude_unset PATCH.
+// `title` and `review_status` are intentionally excluded — they must stay set.
+const NULLABLE_ON_CLEAR = [
+  "agency",
+  "solicitation_number",
+  "source_url",
+  "portal_url",
+  "location",
+  "service_type",
+  "contract_type",
+  "submission_method",
+  "submission_portal",
+  "required_forms_summary",
+  "description",
+  "notes",
+  "review_notes",
+  "priority",
+  "next_action",
+  "due_date",
+  "q_and_a_deadline",
+  "pre_bid_date",
+  "estimated_value",
+];
+
+// Build a PATCH payload for the edit path. Same as buildOpportunityPayload, but
+// for nullable fields the user cleared (non-empty original -> now empty) we send
+// an explicit `null` so the backend actually clears them.
+export function buildOpportunityPatch(values, original = {}) {
+  const payload = buildOpportunityPayload(values);
+  const isEmpty = (value) =>
+    value === undefined || value === null || value === "";
+  for (const field of NULLABLE_ON_CLEAR) {
+    if (isEmpty(values[field]) && !isEmpty(original[field])) {
+      payload[field] = null;
+    }
+  }
+  return payload;
+}

@@ -7,6 +7,7 @@ const { spawnSync } = require("node:child_process");
 
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_MODEL = "qwen3:8b";
+const OLLAMA_MODEL_BASE = OLLAMA_MODEL.split(":")[0];
 
 const desktopDir = __dirname;
 const appRoot = path.resolve(desktopDir, "..");
@@ -132,9 +133,14 @@ function modelNames(tags) {
 }
 
 function hasRequiredModel(names) {
+  // Accept the exact tag, the "-latest" alias, or any tag sharing the model's
+  // base name — e.g. a legit `qwen3` pulled as `qwen3:latest` still counts.
   return names.some((name) => {
     const normalized = String(name).toLowerCase();
-    return normalized === OLLAMA_MODEL || normalized === `${OLLAMA_MODEL}-latest` || normalized === "qwen3";
+    if (normalized === OLLAMA_MODEL || normalized === `${OLLAMA_MODEL}-latest`) {
+      return true;
+    }
+    return normalized.split(":")[0] === OLLAMA_MODEL_BASE;
   });
 }
 

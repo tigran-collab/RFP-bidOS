@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { API_BASE_URL, getAiStatus, getHealth, getOperationsDashboard } from "../api.js";
+import {
+  API_BASE_URL,
+  getAiStatus,
+  getDashboardDigest,
+  getHealth,
+  getOperationsDashboard,
+} from "../api.js";
+import LoadError from "../components/LoadError.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const EXPORTS = [
@@ -8,6 +15,7 @@ const EXPORTS = [
   { label: "Export Requirements CSV", path: "/exports/requirements.csv" },
   { label: "Export Documents CSV", path: "/exports/documents.csv" },
   { label: "Export Logistics QA CSV", path: "/exports/logistics-qa.csv" },
+  { label: "Export Deadlines (.ics)", path: "/exports/deadlines.ics" },
 ];
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
@@ -30,44 +38,88 @@ const SUMMARY_CARDS = [
   { key: "requirements_extracted", label: "Requirements Extracted" },
 ];
 
+function DigestBucket({ title, count, items = [], onOpen, meta }) {
+  return (
+    <div className="digest-bucket">
+      <div className="digest-bucket-head">
+        <span>{title}</span>
+        <strong>{count}</strong>
+      </div>
+      {items.length ? (
+        <ul className="digest-list">
+          {items.slice(0, 6).map((item) => (
+            <li key={item.id}>
+              <button
+                className="link-button"
+                type="button"
+                onClick={() => onOpen(item.id)}
+              >
+                {item.title}
+              </button>
+              {meta && meta(item) ? (
+                <span className="muted-text"> — {meta(item)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted-text">Nothing here.</p>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard({ onOpenOpportunity }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [online, setOnline] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [data, setData] = useState(null);
+  const [digest, setDigest] = useState(null);
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [health, dashboard, ai, digestResult] = await Promise.all([
+        getHealth(),
+        getOperationsDashboard(),
+        getAiStatus(),
+        getDashboardDigest(),
+      ]);
+      setOnline(health.status === "ok");
+      setData(dashboard);
+      setAiStatus(ai);
+      setDigest(digestResult);
+      setError("");
+    } catch (err) {
+      setOnline(false);
+      setError(err.message || errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function loadDashboard() {
-      try {
-        setLoading(true);
-        const [health, dashboard, ai] = await Promise.all([
-          getHealth(),
-          getOperationsDashboard(),
-          getAiStatus(),
-        ]);
-        setOnline(health.status === "ok");
-        setData(dashboard);
-        setAiStatus(ai);
-        setError("");
-      } catch {
-        setOnline(false);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadDashboard();
-  }, []);
+  }, [loadDashboard]);
 
   if (loading) {
     return <p>Loading...</p>;
   }
 
   if (error) {
-    return <p className="error-text">{error}</p>;
+    return <LoadError message={error} onRetry={loadDashboard} />;
   }
+
+  // Local AI is only truly usable when the configured model is actually pulled.
+  const configuredModel = aiStatus?.model || "qwen3:8b";
+  const installedModels = Array.isArray(aiStatus?.models)
+    ? aiStatus.models
+        .map((m) => m?.name || m?.model)
+        .filter(Boolean)
+    : [];
+  const modelInstalled =
+    !aiStatus?.available || installedModels.includes(configuredModel);
 
   const counts = data?.counts || {};
   const {
@@ -86,9 +138,15 @@ export default function Dashboard({ onOpenOpportunity }) {
       </p>
       <p className="muted-text">
         Local AI:{" "}
-        <strong>{aiStatus?.available ? "Available" : "Unavailable"}</strong>
+        <strong>
+          {!aiStatus?.available
+            ? "Unavailable"
+            : modelInstalled
+              ? "Available"
+              : `Model not installed — run: ollama pull ${configuredModel}`}
+        </strong>
         {" | Model: "}
-        <strong>{aiStatus?.model || "qwen3:8b"}</strong>
+        <strong>{configuredModel}</strong>
       </p>
 
       <div className="metrics-grid">
@@ -99,6 +157,45 @@ export default function Dashboard({ onOpenOpportunity }) {
           </div>
         ))}
       </div>
+
+      {digest ? (
+        <>
+          <h2>Daily Digest — What changed (last {digest.days} days)</h2>
+          <div className="digest-grid">
+            <DigestBucket
+              title="New"
+              count={digest.counts?.new_opportunities ?? 0}
+              items={digest.new_opportunities}
+              onOpen={openOpportunity}
+              meta={(item) => item.agency || item.relevance_decision || ""}
+            />
+            <DigestBucket
+              title="Upcoming deadlines"
+              count={digest.counts?.upcoming_deadlines ?? 0}
+              items={digest.upcoming_deadlines}
+              onOpen={openOpportunity}
+              meta={(item) =>
+                item.days_until === 0
+                  ? "due today"
+                  : item.days_until > 0
+                    ? `in ${item.days_until} day(s)`
+                    : formatDate(item.due_date)
+              }
+            />
+            <DigestBucket
+              title="At risk"
+              count={digest.counts?.at_risk ?? 0}
+              items={digest.at_risk}
+              onOpen={openOpportunity}
+              meta={(item) =>
+                item.days_until !== null && item.days_until < 0
+                  ? `${Math.abs(item.days_until)} day(s) ago`
+                  : item.deadline_risk || "high risk"
+              }
+            />
+          </div>
+        </>
+      ) : null}
 
       <h2>Exports</h2>
       <div className="export-buttons">

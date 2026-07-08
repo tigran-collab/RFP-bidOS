@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 
+import LoadError from "../components/LoadError.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import {
   addPortal,
@@ -47,6 +48,7 @@ export default function Portals() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loadErr, setLoadErr] = useState("");
   const [message, setMessage] = useState("");
 
   // Add-a-portal form state.
@@ -75,14 +77,14 @@ export default function Portals() {
       );
       setSources(credentialSources);
       setTemplates(loadedTemplates || []);
-      setError("");
+      setLoadErr("");
       // Fill in live status (saved session, keychain state) per portal in the
       // background so labels reflect reality on load, not the stale DB column.
       credentialSources.forEach((source) => {
         refreshLoginStatus(source.id);
       });
-    } catch {
-      setError(loadError);
+    } catch (err) {
+      setLoadErr(err.message || loadError);
     } finally {
       setLoading(false);
     }
@@ -313,8 +315,17 @@ export default function Portals() {
         </form>
       </div>
 
-      {message ? <p>{message}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
+      {loadErr ? <LoadError message={loadErr} onRetry={loadAll} /> : null}
+      {message ? (
+        <p role="status" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="error-text" role="status" aria-live="polite">
+          {error}
+        </p>
+      ) : null}
 
       {!sources.length ? (
         <p className="muted-text">

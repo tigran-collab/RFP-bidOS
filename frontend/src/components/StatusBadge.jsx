@@ -1,7 +1,7 @@
 // Map a status string to a color variant so badges read at a glance.
-const SUCCESS = ["bid", "pursue", "passed", "relevant", "low", "available", "completed", "downloaded", "parsed", "verified", "active", "open"];
-const DANGER = ["no bid", "do not pursue", "failed", "past due", "disqualifying", "high", "unavailable", "error", "missing", "not relevant"];
-const WARN = ["needs review", "watchlist", "maybe", "medium", "pending", "needs action", "review"];
+const SUCCESS = ["bid", "pursue", "passed", "relevant", "low", "available", "completed", "downloaded", "parsed", "verified", "active", "open", "session saved", "saved", "ready", "connected"];
+const DANGER = ["no bid", "do not pursue", "failed", "past due", "disqualifying", "high", "unavailable", "error", "missing", "not relevant", "expired"];
+const WARN = ["needs review", "watchlist", "maybe", "medium", "pending", "needs action", "review", "needs credentials"];
 const INFO = ["new", "identified", "assigned", "addressed", "archived"];
 
 function variantFor(status) {

@@ -6,6 +6,7 @@ import {
   reviewOpportunity,
   runPursuitPrep,
 } from "../api.js";
+import LoadError from "../components/LoadError.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const errorMessage = "Failed to load review queue. Is the backend running?";
@@ -41,6 +42,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [deadlineRiskFilter, setDeadlineRiskFilter] = useState("");
@@ -82,9 +84,9 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         ),
       );
       setError("");
-    } catch {
+    } catch (err) {
       if (seq === requestSeq.current) {
-        setError(errorMessage);
+        setError(err.message || errorMessage);
       }
     } finally {
       if (seq === requestSeq.current) {
@@ -190,6 +192,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
 
   async function recomputePriorities() {
     try {
+      setRecomputing(true);
       setMessage("Recomputing priorities...");
       const result = await prioritizeAll();
       setMessage(`Priorities recomputed for ${result.updated} opportunity(ies).`);
@@ -197,6 +200,8 @@ export default function ReviewQueue({ onOpenOpportunity }) {
       await loadQueue();
     } catch (err) {
       setError(err.message || "Failed to recompute priorities.");
+    } finally {
+      setRecomputing(false);
     }
   }
 
@@ -208,8 +213,13 @@ export default function ReviewQueue({ onOpenOpportunity }) {
     <section>
       <h1>Review Queue</h1>
       <div className="review-toolbar">
-        <button type="button" onClick={recomputePriorities}>
-          Recompute priorities
+        <button
+          type="button"
+          disabled={recomputing}
+          aria-busy={recomputing}
+          onClick={recomputePriorities}
+        >
+          {recomputing ? "Recomputing…" : "Recompute priorities"}
         </button>
       </div>
       <div className="review-filters">
@@ -322,8 +332,12 @@ export default function ReviewQueue({ onOpenOpportunity }) {
         </div>
       ) : null}
 
-      {message ? <p>{message}</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
+      {message ? (
+        <p role="status" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
+      {error ? <LoadError message={error} onRetry={loadQueue} /> : null}
 
       {!opportunities.length ? (
         <p>No opportunities match the current filters.</p>
@@ -406,6 +420,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                   <select
                     value={opp.priority || ""}
                     disabled={busyId === opp.id}
+                    aria-label={`Set priority for ${opp.title}`}
                     onChange={(event) =>
                       applyReview(
                         opp.id,
@@ -463,6 +478,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
                       type="text"
                       value={notesDraft[opp.id] ?? ""}
                       placeholder="Review notes"
+                      aria-label={`Review notes for ${opp.title}`}
                       onChange={(event) => {
                         dirtyNotes.current.add(opp.id);
                         setNotesDraft((current) => ({

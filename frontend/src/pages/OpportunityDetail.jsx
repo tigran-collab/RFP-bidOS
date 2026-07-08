@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   aiEvaluateOpportunity,
@@ -23,8 +23,9 @@ import {
   updateOpportunity,
 } from "../api.js";
 import OpportunityFields, {
-  buildOpportunityPayload,
+  buildOpportunityPatch,
 } from "../components/OpportunityFields.jsx";
+import LoadError from "../components/LoadError.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 function toEditValues(o) {
@@ -140,44 +141,44 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
   const [actionError, setActionError] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadOpportunity() {
-      if (!opportunityId) {
-        setError(errorMessage);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        const [
-          opportunityResult,
-          documentsResult,
-          evaluationsResult,
-          requirementsResult,
-          qaResult,
-        ] = await Promise.all([
-          getOpportunity(opportunityId),
-          getOpportunityDocuments(opportunityId),
-          getOpportunityEvaluations(opportunityId),
-          getOpportunityRequirements(opportunityId),
-          getLogisticsQA(opportunityId),
-        ]);
-        setOpportunity(opportunityResult);
-        setDocuments(documentsResult ?? []);
-        setEvaluations(evaluationsResult ?? []);
-        setRequirements(requirementsResult ?? []);
-        setLogisticsQA(qaResult && qaResult.qa_status ? qaResult : null);
-        setError("");
-      } catch {
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
-      }
+  const loadOpportunity = useCallback(async () => {
+    if (!opportunityId) {
+      setError(errorMessage);
+      setLoading(false);
+      return;
     }
 
-    loadOpportunity();
+    try {
+      setLoading(true);
+      const [
+        opportunityResult,
+        documentsResult,
+        evaluationsResult,
+        requirementsResult,
+        qaResult,
+      ] = await Promise.all([
+        getOpportunity(opportunityId),
+        getOpportunityDocuments(opportunityId),
+        getOpportunityEvaluations(opportunityId),
+        getOpportunityRequirements(opportunityId),
+        getLogisticsQA(opportunityId),
+      ]);
+      setOpportunity(opportunityResult);
+      setDocuments(documentsResult ?? []);
+      setEvaluations(evaluationsResult ?? []);
+      setRequirements(requirementsResult ?? []);
+      setLogisticsQA(qaResult && qaResult.qa_status ? qaResult : null);
+      setError("");
+    } catch (err) {
+      setError(err.message || errorMessage);
+    } finally {
+      setLoading(false);
+    }
   }, [opportunityId]);
+
+  useEffect(() => {
+    loadOpportunity();
+  }, [loadOpportunity]);
 
   async function runScore() {
     try {
@@ -262,7 +263,7 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
     }
     try {
       setSavingEdit(true);
-      const payload = buildOpportunityPayload(editValues);
+      const payload = buildOpportunityPatch(editValues, toEditValues(opportunity));
       const updated = await updateOpportunity(opportunityId, payload);
       setOpportunity(updated);
       setEditing(false);
@@ -477,7 +478,7 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
   }
 
   if (error) {
-    return <p className="error-text">{error}</p>;
+    return <LoadError message={error} onRetry={loadOpportunity} />;
   }
 
   const latestEvaluation = evaluations[0] || null;
@@ -594,8 +595,16 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
           </button>
         </div>
       </div>
-      {actionMessage ? <p>{actionMessage}</p> : null}
-      {actionError ? <p className="error-text">{actionError}</p> : null}
+      {actionMessage ? (
+        <p role="status" aria-live="polite">
+          {actionMessage}
+        </p>
+      ) : null}
+      {actionError ? (
+        <p className="error-text" role="status" aria-live="polite">
+          {actionError}
+        </p>
+      ) : null}
       {editing ? (
         <div className="edit-panel">
           <h2>Edit Opportunity</h2>
@@ -854,12 +863,14 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
           type="text"
           value={docUrl}
           placeholder="https://example.gov/file.pdf"
+          aria-label="Manual document URL"
           onChange={(event) => setDocUrl(event.target.value)}
         />
         <input
           type="text"
           value={docLabel}
           placeholder="Label (optional)"
+          aria-label="Manual document label"
           onChange={(event) => setDocLabel(event.target.value)}
         />
         <button

@@ -19,6 +19,7 @@
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
   },
+  "//packaging-todo": "This config packages ONLY the launcher (main/status/assets). It is NOT a working distributable: main.js resolves appRoot to the repo parent and needs a sibling backend/.venv and frontend/node_modules at runtime, which are not bundled. A real distributable must (1) ship backend + frontend as extraResources, (2) detect app.isPackaged and resolve appRoot to process.resourcesPath instead of path.resolve(__dirname, '..'), and (3) bundle/point at a Python runtime and a built frontend. Until then, treat `npm run package` as dev-only.",
   "build": {
     "appId": "com.rfpbidos.desktop",
     "productName": "RFP BidOS",
@@ -27,7 +28,6 @@
     },
     "files": [
       "main.js",
-      "preload.js",
       "status.html",
       "status-preload.js",
       "assets/**/*",
