@@ -6,7 +6,7 @@ Offline: calls daily_run with do_scrape=False so no network is touched.
 from datetime import UTC, datetime, timedelta
 
 from app.models import Opportunity
-from app.services.daily_run import daily_run
+from app.services.daily_run import _score_all, daily_run
 
 
 def _utc_now() -> datetime:
@@ -69,3 +69,53 @@ def test_daily_run_offline(session):
     # At-risk should include the past-due opp.
     at_risk_ids = {item["id"] for item in digest["at_risk"]}
     assert opps[2].id in at_risk_ids
+
+
+def test_daily_run_never_auto_declines_new_bid(session):
+    """workflow#3: a sparse New bid that scores negative must not be moved to a
+    terminal status by the unattended run -- it caps at 'Needs Review'."""
+    sparse = Opportunity(
+        title="Security Guard Services",  # security match, but no license text
+        agency="Some County",
+        relevance_decision="Relevant",
+        review_status="New",
+        created_at=_utc_now() - timedelta(hours=1),
+        # no due_date, no license terms -> negative score -> "Do Not Pursue"
+    )
+    session.add(sparse)
+    session.commit()
+    session.refresh(sparse)
+
+    # Confirm the scorer would suggest a terminal status for this row.
+    from app.services.scorer import score_opportunity_text
+
+    assert score_opportunity_text(sparse)["suggested_review_status"] == "Do Not Pursue"
+
+    daily_run(session, do_scrape=False)
+    session.refresh(sparse)
+    assert sparse.review_status == "Needs Review"
+
+
+def test_score_all_is_noop_when_nothing_changes(session):
+    """M2: re-scoring an already-scored, unchanged opportunity must not touch
+    updated_at (returns 0 changed on the second pass)."""
+    opp = Opportunity(
+        title="Unarmed Security Guard Services",
+        relevance_decision="Relevant",
+        review_status="Needs Review",
+        created_at=_utc_now() - timedelta(hours=1),
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    session.add(opp)
+    session.commit()
+    session.refresh(opp)
+
+    first = _score_all(session)
+    assert first >= 1
+    session.refresh(opp)
+    stamp_after_first = opp.updated_at
+
+    second = _score_all(session)
+    assert second == 0
+    session.refresh(opp)
+    assert opp.updated_at == stamp_after_first  # not churned

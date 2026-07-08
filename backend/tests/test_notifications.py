@@ -82,16 +82,15 @@ def test_new_opportunities_bucket(session):
     opps = _seed(session)
     digest = build_digest(session, days=7)
     ids = {item["id"] for item in digest["new_opportunities"]}
-    # Relevant + recent + not archived/DNP-excluded-from-new.
-    # do_not_pursue is only excluded from deadlines/at_risk, not from new (but
-    # it was created 2 days ago which is within window, and is Relevant).
+    # Relevant + recent + not archived/declined.
     assert opps["new_relevant"].id in ids
     assert opps["due_soon"].id in ids
     assert opps["past_due"].id in ids
-    assert opps["do_not_pursue"].id in ids
-    # Not Relevant and Archived are excluded.
+    # Not Relevant, Archived, and Do Not Pursue are excluded from "new"
+    # (a declined bid must not resurface as new every day).
     assert opps["not_relevant"].id not in ids
     assert opps["archived"].id not in ids
+    assert opps["do_not_pursue"].id not in ids
 
 
 def test_upcoming_deadlines_bucket(session):
@@ -122,8 +121,9 @@ def test_counts_and_render(session):
     assert counts["new_opportunities"] == len(digest["new_opportunities"])
     assert counts["upcoming_deadlines"] == len(digest["upcoming_deadlines"])
     assert counts["at_risk"] == len(digest["at_risk"])
-    # active = all non-archived.
-    assert counts["active_opportunities"] == 5
+    # active = all non-archived AND non-declined (excludes Archived + DNP).
+    # 6 seeded - 1 archived - 1 do_not_pursue = 4.
+    assert counts["active_opportunities"] == 4
 
     text = render_digest_text(digest)
     assert "Due Soon Security Services" in text

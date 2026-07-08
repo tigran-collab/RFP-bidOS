@@ -1,7 +1,8 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
+from app.utils.dates import days_until_date
 from app.services.scrapers.keywords import (
     AS_NEEDED_WARNING_KEYWORDS,
     NEGATIVE_KEYWORDS,
@@ -195,14 +196,28 @@ def _suggested_review_status(score: int, disqualified: bool) -> str:
     return "Needs Review"
 
 
-def apply_scored_review_status(opportunity: Any, suggested: str) -> None:
+TERMINAL_REVIEW_STATUSES = {"Do Not Pursue", "Archived"}
+
+
+def apply_scored_review_status(
+    opportunity: Any, suggested: str, allow_terminal: bool = True
+) -> None:
     """Apply a suggested review status without overriding a human decision.
 
     Only updates when the opportunity has not yet been triaged
     (review_status is None or "New").
+
+    When ``allow_terminal`` is False (used by the unattended daily run), an
+    untriaged "New" item is never moved straight to a terminal status such as
+    "Do Not Pursue"/"Archived" -- it is capped at "Needs Review" so a relevant
+    bid scraped from a sparse row cannot silently vanish from every attention
+    surface. The default (True) preserves the prior behavior for explicit
+    manual/CLI use.
     """
     current = getattr(opportunity, "review_status", None)
     if current in (None, "", "New"):
+        if not allow_terminal and suggested in TERMINAL_REVIEW_STATUSES:
+            suggested = "Needs Review"
         opportunity.review_status = suggested
 
 
@@ -243,13 +258,8 @@ def _location_matches(location: Any) -> bool:
 
 
 def _days_until(value: datetime) -> int:
-    if value.tzinfo is None:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        delta = value - now
-    else:
-        now = datetime.now(timezone.utc)
-        delta = value.astimezone(timezone.utc) - now
-    return delta.days
+    # DATE-granularity so an item due today reads as 0, not -1 in the afternoon.
+    return days_until_date(value)
 
 
 def _estimated_value(opportunity: Any) -> float:

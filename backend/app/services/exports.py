@@ -52,6 +52,14 @@ OPPORTUNITY_COLUMNS = [
     "review_notes",
     "created_at",
     "updated_at",
+    # Appended user-relevant persisted columns (order above kept stable).
+    "description",
+    "relevance_decision",
+    "relevance_score",
+    "priority_tier",
+    "priority_rank",
+    "ai_risk_level",
+    "bid_reason",
 ]
 
 REQUIREMENT_COLUMNS = [
@@ -68,6 +76,12 @@ REQUIREMENT_COLUMNS = [
     "status",
     "assigned_response_section",
     "notes",
+    # Appended requirement columns present on the model (order above kept stable).
+    "risk",
+    "owner",
+    "evidence_needed",
+    "response_location",
+    "source_file",
 ]
 
 DOCUMENT_COLUMNS = [
@@ -180,6 +194,11 @@ def export_requirements_csv(session, opportunity_id: int | None = None) -> tuple
                 "status": _value(req, "status"),
                 "assigned_response_section": _value(req, "assigned_response_section"),
                 "notes": _value(req, "notes"),
+                "risk": _value(req, "risk"),
+                "owner": _value(req, "owner"),
+                "evidence_needed": _value(req, "evidence_needed"),
+                "response_location": _value(req, "response_location"),
+                "source_file": _value(req, "source_file"),
             }
         )
     return _write_csv(REQUIREMENT_COLUMNS, rows), len(rows)

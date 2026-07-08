@@ -22,7 +22,7 @@ from datetime import datetime
 from sqlmodel import Session, select
 
 from app.models import Opportunity
-from app.utils.dates import to_naive_utc
+from app.utils.dates import days_until_date
 
 # Component weight ceilings.
 RELEVANCE_MAX = 40.0
@@ -71,7 +71,7 @@ def _deadline_component(opportunity: Opportunity, now: datetime, reasons: list[s
         reasons.append("No due date")
         return DEADLINE_MAX * 0.2
 
-    days = (to_naive_utc(due) - now).total_seconds() / 86400.0
+    days = days_until_date(due, now)
     if days < 0:
         reasons.append("Past due")
         return 0.0

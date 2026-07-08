@@ -5,24 +5,24 @@ no AI. Intended for a daily heads-up via CLI or API.
 """
 
 from datetime import UTC, datetime, timedelta
-from math import floor
 
 from sqlmodel import select
 
 from app.models import Opportunity
-from app.utils.dates import to_naive_utc
+from app.utils.dates import days_until_date, to_naive_utc
 
-EXCLUDED_FROM_NEW = {"Archived"}
+# "Do Not Pursue" is a declined bid: it should not resurface as a new
+# opportunity for the next 7 days, so exclude it from the "new" bucket too.
+EXCLUDED_FROM_NEW = {"Archived", "Do Not Pursue"}
 EXCLUDED_FROM_DEADLINES = {"Archived", "Do Not Pursue"}
 EXCLUDED_FROM_AT_RISK = {"Archived", "Do Not Pursue"}
+# Relevance values that qualify as "new". None is included so manually-created
+# opportunities (which never get a scraper relevance_decision) still surface.
+NEW_RELEVANCE_VALUES = ("Relevant", "Maybe Relevant", None)
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _days_until(due: datetime, now: datetime) -> int:
-    return floor((to_naive_utc(due) - now).total_seconds() / 86400.0)
 
 
 def _status_of(opp: Opportunity) -> str:
@@ -39,13 +39,19 @@ def build_digest(session, days: int = 7, limit: int = 50) -> dict:
     cutoff = now - timedelta(days=window)
     opportunities = list(session.exec(select(Opportunity)).all())
 
-    active = [o for o in opportunities if _status_of(o) != "Archived"]
+    # "Active" excludes declined/terminal statuses, not just Archived.
+    active = [
+        o
+        for o in opportunities
+        if _status_of(o) not in {"Archived", "Do Not Pursue"}
+    ]
 
-    # New opportunities: relevant/maybe-relevant and recently created.
+    # New opportunities: relevant / maybe-relevant / manually-created (NULL
+    # decision) and recently created, excluding declined/archived statuses.
     new_candidates = [
         o
         for o in opportunities
-        if o.relevance_decision in ("Relevant", "Maybe Relevant")
+        if o.relevance_decision in NEW_RELEVANCE_VALUES
         and o.created_at is not None
         and to_naive_utc(o.created_at) >= cutoff
         and _status_of(o) not in EXCLUDED_FROM_NEW
@@ -71,7 +77,7 @@ def build_digest(session, days: int = 7, limit: int = 50) -> dict:
     for o in opportunities:
         if not o.due_date or _status_of(o) in EXCLUDED_FROM_DEADLINES:
             continue
-        days_until = _days_until(o.due_date, now)
+        days_until = days_until_date(o.due_date, now)
         if 0 <= days_until <= window:
             upcoming_candidates.append((days_until, o))
     upcoming_candidates.sort(key=lambda pair: to_naive_utc(pair[1].due_date))
@@ -92,9 +98,10 @@ def build_digest(session, days: int = 7, limit: int = 50) -> dict:
     for o in opportunities:
         if _status_of(o) in EXCLUDED_FROM_AT_RISK:
             continue
-        past_due = o.due_date is not None and to_naive_utc(o.due_date) < now
+        days_until = days_until_date(o.due_date, now) if o.due_date else None
+        # Past due at DATE granularity: due today (0) is NOT past due.
+        past_due = days_until is not None and days_until < 0
         if past_due or o.deadline_risk == "High":
-            days_until = _days_until(o.due_date, now) if o.due_date else None
             at_risk_candidates.append((o.due_date, days_until, o))
     at_risk_candidates.sort(
         key=lambda triple: to_naive_utc(triple[0]) if triple[0] else datetime.max
@@ -112,7 +119,8 @@ def build_digest(session, days: int = 7, limit: int = 50) -> dict:
     ]
 
     counts = {
-        "new_opportunities": len(new_opportunities),
+        # Report the true number of new opportunities, not the truncated list.
+        "new_opportunities": len(new_candidates),
         "upcoming_deadlines": len(upcoming_deadlines),
         "at_risk": len(at_risk),
         "active_opportunities": len(active),

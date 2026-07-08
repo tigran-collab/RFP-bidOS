@@ -16,7 +16,7 @@ from app.models import (
     Requirement,
     SourceConfig,
 )
-from app.utils.dates import to_naive_utc
+from app.utils.dates import days_until_date, to_naive_utc
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 
 UPCOMING_WINDOW_DAYS = 30
@@ -38,8 +38,9 @@ def _utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _days_until(due: datetime, now: datetime) -> float:
-    return (to_naive_utc(due) - now).total_seconds() / 86400.0
+def _days_until(due: datetime, now: datetime) -> int:
+    # DATE-granularity: an item due today is 0 days out, not negative.
+    return days_until_date(due, now)
 
 
 def _checked_at_key(qa: "BidLogisticsQA") -> datetime:

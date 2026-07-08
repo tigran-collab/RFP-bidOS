@@ -137,6 +137,28 @@ def test_apply_scored_review_status_fills_new():
     assert opp.review_status == "Needs Review"
 
 
+def test_apply_scored_review_status_allow_terminal_default_assigns_terminal():
+    # Default (manual/CLI) behavior: a New item may be moved to a terminal
+    # status when explicitly requested.
+    opp = make_opp(review_status="New")
+    apply_scored_review_status(opp, "Do Not Pursue")
+    assert opp.review_status == "Do Not Pursue"
+
+
+def test_apply_scored_review_status_no_terminal_caps_at_needs_review():
+    # Unattended (allow_terminal=False): a New item is never auto-declined; the
+    # terminal suggestion is capped at "Needs Review".
+    opp = make_opp(review_status="New")
+    apply_scored_review_status(opp, "Do Not Pursue", allow_terminal=False)
+    assert opp.review_status == "Needs Review"
+
+
+def test_apply_scored_review_status_no_terminal_still_allows_needs_review():
+    opp = make_opp(review_status="New")
+    apply_scored_review_status(opp, "Needs Review", allow_terminal=False)
+    assert opp.review_status == "Needs Review"
+
+
 def test_location_matches_state_code_word_boundary():
     assert _location_matches("Los Angeles, CA") is True
     assert _location_matches("Carson City, NV") is True  # NV token, not " ca" substring

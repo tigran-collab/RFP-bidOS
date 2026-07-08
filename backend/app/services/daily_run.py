@@ -67,21 +67,50 @@ def _scrape_enabled_sources(session) -> dict:
 
 
 def _score_all(session) -> int:
+    """Re-score every non-archived opportunity, persisting only real changes.
+
+    Stamping ``updated_at`` on every row each run destroyed the dashboard's
+    "Recent Activity" ordering and churned the ICS DTSTAMP, so fields (and
+    ``updated_at``) are written only when the recomputed value actually differs
+    from what is stored. The count returned is the number of rows changed.
+
+    Automation must never assign a TERMINAL status: ``allow_terminal=False``
+    caps an untriaged "New" bid at "Needs Review" so a low-scoring but relevant
+    bid is not silently declined unattended.
+    """
     opportunities = list(session.exec(select(Opportunity)).all())
-    scored = 0
+    changed = 0
     for opportunity in opportunities:
         if opportunity.review_status == "Archived":
             continue
         scoring_result = score_opportunity_text(opportunity)
-        opportunity.bid_score = scoring_result["score"]
-        opportunity.bid_decision = scoring_result["decision"]
-        opportunity.bid_reason = scoring_result["reason"]
-        apply_scored_review_status(opportunity, scoring_result["suggested_review_status"])
-        opportunity.updated_at = _utc_now()
-        session.add(opportunity)
-        scored += 1
+
+        dirty = False
+        if opportunity.bid_score != scoring_result["score"]:
+            opportunity.bid_score = scoring_result["score"]
+            dirty = True
+        if opportunity.bid_decision != scoring_result["decision"]:
+            opportunity.bid_decision = scoring_result["decision"]
+            dirty = True
+        if opportunity.bid_reason != scoring_result["reason"]:
+            opportunity.bid_reason = scoring_result["reason"]
+            dirty = True
+
+        status_before = opportunity.review_status
+        apply_scored_review_status(
+            opportunity,
+            scoring_result["suggested_review_status"],
+            allow_terminal=False,
+        )
+        if opportunity.review_status != status_before:
+            dirty = True
+
+        if dirty:
+            opportunity.updated_at = _utc_now()
+            session.add(opportunity)
+            changed += 1
     session.commit()
-    return scored
+    return changed
 
 
 def daily_run(session, do_scrape: bool = True, days: int = 7) -> dict:
