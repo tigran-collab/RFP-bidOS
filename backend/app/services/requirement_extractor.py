@@ -183,7 +183,27 @@ def extract_requirements_with_local_ai(opportunity_id: int, session) -> dict:
     outcome = _run_local_ai_extraction(opportunity_id, session)
     if "extraction_result" not in outcome:
         return outcome
+    # Idempotent: pursuit prep and the UI button both call this, so a second run
+    # must not double the requirements. Delete this opportunity's prior
+    # local-AI rows, then insert the fresh set in the SAME transaction (the
+    # delete is only staged here; save_extracted_requirements commits both
+    # together) so a failed extraction never destroys existing rows. The
+    # extraction already succeeded above, so no early failure reaches this point.
+    _delete_local_ai_requirements(opportunity_id, session)
     return _save_and_summarize(opportunity_id, outcome["extraction_result"], session)
+
+
+def _delete_local_ai_requirements(opportunity_id: int, session) -> None:
+    existing = list(
+        session.exec(
+            select(Requirement).where(
+                Requirement.opportunity_id == opportunity_id,
+                Requirement.extractor_type == "local_ollama",
+            )
+        ).all()
+    )
+    for requirement in existing:
+        session.delete(requirement)
 
 
 def _run_local_ai_extraction(opportunity_id: int, session) -> dict:
@@ -204,7 +224,7 @@ def _run_local_ai_extraction(opportunity_id: int, session) -> dict:
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
-                "options": {"temperature": 0.1},
+                "options": {"temperature": 0.1, "num_ctx": 8192, "num_predict": 1024},
             },
             timeout=180,
         )
@@ -293,16 +313,7 @@ def refresh_requirements_with_local_ai(opportunity_id: int, session) -> dict:
     outcome = _run_local_ai_extraction(opportunity_id, session)
     if "extraction_result" not in outcome:
         return outcome
-    existing = list(
-        session.exec(
-            select(Requirement).where(
-                Requirement.opportunity_id == opportunity_id,
-                Requirement.extractor_type == "local_ollama",
-            )
-        ).all()
-    )
-    for requirement in existing:
-        session.delete(requirement)
+    _delete_local_ai_requirements(opportunity_id, session)
     return _save_and_summarize(opportunity_id, outcome["extraction_result"], session)
 
 

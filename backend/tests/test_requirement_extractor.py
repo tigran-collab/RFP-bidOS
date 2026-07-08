@@ -13,6 +13,7 @@ from app.models import Document, Opportunity, Requirement
 from app.services import requirement_extractor
 from app.services.requirement_extractor import (
     _parse_datetime_or_none,
+    extract_requirements_with_local_ai,
     refresh_requirements_with_local_ai,
 )
 
@@ -132,6 +133,56 @@ def test_refresh_replaces_existing_requirements_on_success(
     remaining = _requirements_for(session, opportunity.id)
     assert len(remaining) == 1
     assert remaining[0].requirement_text == "Contractor must hold a BSIS PPO license."
+
+
+def test_extract_is_idempotent_across_two_runs(session, tmp_path, monkeypatch):
+    opportunity = _seed_opportunity(session, tmp_path)
+    extraction = {
+        "summary": "One requirement found.",
+        "requirements": [
+            {
+                "requirement_type": "License",
+                "title": "BSIS License",
+                "requirement_text": "Contractor must hold a BSIS PPO license.",
+                "mandatory": True,
+                "status": "Needs Review",
+            }
+        ],
+        "missing_information": [],
+        "risk_flags": [],
+    }
+    monkeypatch.setattr(
+        requirement_extractor.requests,
+        "post",
+        lambda *args, **kwargs: _FakeOllamaResponse({"response": json.dumps(extraction)}),
+    )
+
+    first = extract_requirements_with_local_ai(opportunity.id, session)
+    second = extract_requirements_with_local_ai(opportunity.id, session)
+
+    assert first["requirements_count"] == 1
+    assert second["requirements_count"] == 1
+    remaining = _requirements_for(session, opportunity.id)
+    assert len(remaining) == 1
+    assert remaining[0].requirement_text == "Contractor must hold a BSIS PPO license."
+
+
+def test_extract_keeps_existing_requirements_when_ollama_is_down(
+    session, tmp_path, monkeypatch
+):
+    opportunity = _seed_opportunity(session, tmp_path)
+
+    def _raise(*args, **kwargs):
+        raise requests.ConnectionError("Ollama is down")
+
+    monkeypatch.setattr(requirement_extractor.requests, "post", _raise)
+
+    result = extract_requirements_with_local_ai(opportunity.id, session)
+
+    assert "error" in result
+    remaining = _requirements_for(session, opportunity.id)
+    assert len(remaining) == 1
+    assert remaining[0].requirement_text == "Submit proposal through the portal."
 
 
 def test_parse_datetime_converts_non_utc_offset_to_utc():

@@ -104,13 +104,28 @@ def generate_json(
         "prompt": prompt,
         "stream": False,
         "format": "json",
-        "options": {"temperature": temperature},
+        "options": {
+            "temperature": temperature,
+            "num_ctx": 8192,
+            "num_predict": 1024,
+        },
     }
     try:
         response = _post_generate(payload, timeout=120)
         ollama_payload = response.json()
-    except (requests.RequestException, ValueError) as exc:
+    except requests.Timeout as exc:
+        raise LocalAITimeoutError(OLLAMA_TIMEOUT) from exc
+    except requests.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
+        if status_code == 404:
+            raise LocalAIModelMissingError(
+                f"Ollama is running, but {model_name} is not installed. Run: ollama pull {model_name}"
+            ) from exc
+        raise LocalAIGenerateError(f"{OLLAMA_GENERATE_FAILED} {_error_message(exc)}") from exc
+    except requests.ConnectionError as exc:
         raise LocalAIUnavailableError(LOCAL_AI_UNAVAILABLE) from exc
+    except (requests.RequestException, ValueError) as exc:
+        raise LocalAIGenerateError(f"{OLLAMA_GENERATE_FAILED} {_error_message(exc)}") from exc
 
     response_text = str(ollama_payload.get("response", ""))
     parsed_json: Any | None = None

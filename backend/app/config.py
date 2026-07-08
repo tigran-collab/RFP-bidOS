@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(BACKEND_ROOT / ".env"),
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     @field_validator("database_url", mode="before")
