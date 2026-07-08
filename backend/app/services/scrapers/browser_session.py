@@ -34,8 +34,29 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+
+# A persistent Chromium profile can only be opened by one context at a time
+# (Chromium holds a per-profile SingletonLock). Assisted login runs a long-lived
+# visible context while a concurrent scrape or portal download may try to open
+# the SAME profile dir, corrupting the profile or crashing the launch. Serialize
+# every persistent-context session per profile dir with a process-wide lock.
+_PROFILE_LOCKS: dict[str, threading.Lock] = {}
+_PROFILE_LOCKS_GUARD = threading.Lock()
+
+
+def _profile_lock(profile_dir: str) -> threading.Lock:
+    key = str(Path(profile_dir))
+    with _PROFILE_LOCKS_GUARD:
+        lock = _PROFILE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _PROFILE_LOCKS[key] = lock
+        return lock
 
 
 def _browser_channels() -> list[str | None]:
@@ -232,7 +253,7 @@ def assisted_login(
     profile_dir = _ensure_profile_dir(profile_dir)
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
-    with sync_playwright() as pw:
+    with _profile_lock(profile_dir), sync_playwright() as pw:
         try:
             context = _launch_persistent_context(pw, profile_dir, headless=False)
         except Exception as exc:  # noqa: BLE001 - surface a clear operator message
@@ -342,7 +363,7 @@ def fetch_authenticated_json(
         )
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
-    with sync_playwright() as pw:
+    with _profile_lock(profile_dir), sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
         _restore_session_state(context, profile_dir)
         try:
@@ -392,7 +413,7 @@ def fetch_authenticated_html(
         )
     timeout_ms = max(1, int(timeout_seconds)) * 1000
 
-    with sync_playwright() as pw:
+    with _profile_lock(profile_dir), sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
         _restore_session_state(context, profile_dir)
         try:
@@ -438,6 +459,77 @@ def fetch_authenticated_html(
                 pass
 
 
+def fetch_authenticated_html_batch(
+    page_urls: list[str],
+    profile_dir: str,
+    wait_selector: str | None = None,
+    timeout_seconds: int = 45,
+    headless: bool = True,
+    throttle_seconds: float = 0.0,
+) -> list[dict]:
+    """Fetch several pages' HTML within a SINGLE persisted browser context.
+
+    Reuses ONE headless persistent context for every URL instead of launching a
+    fresh Playwright browser per page (the previous per-page path launched 1 + N
+    browsers for one authenticated scrape, with no politeness delay). Navigates
+    to each URL in order and returns a list of per-URL dicts, aligned with and
+    the same length (or shorter) as ``page_urls``::
+
+        {"url": str, "html": str, "error": Exception | None, "session_expired": bool}
+
+    On success ``html`` is the rendered outerHTML and ``error`` is None. A
+    per-page navigation failure yields ``html=""`` and the exception. A
+    SessionExpiredError additionally sets ``session_expired`` True and STOPS the
+    batch (the session is dead for every remaining URL), so the returned list is
+    truncated at that point. ``throttle_seconds`` sleeps between successive
+    navigations for politeness.
+
+    Raises PlaywrightNotInstalledError if Playwright is absent and
+    SessionExpiredError if the profile dir does not exist (no session at all).
+    """
+    sync_playwright = _require_playwright()
+    if not Path(profile_dir).exists():
+        raise SessionExpiredError(
+            f"No persisted browser profile at {profile_dir}. Run assisted login first."
+        )
+    timeout_ms = max(1, int(timeout_seconds)) * 1000
+    throttle_seconds = max(0.0, float(throttle_seconds))
+    results: list[dict] = []
+
+    with _profile_lock(profile_dir), sync_playwright() as pw:
+        context = _launch_persistent_context(pw, profile_dir, headless=headless)
+        _restore_session_state(context, profile_dir)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            for index, url in enumerate(page_urls):
+                if index and throttle_seconds:
+                    time.sleep(throttle_seconds)
+                try:
+                    response = page.goto(url, timeout=timeout_ms)
+                    status = response.status if response is not None else None
+                    final_url = page.url
+                    if wait_selector:
+                        try:
+                            page.wait_for_selector(wait_selector, timeout=timeout_ms)
+                        except Exception:
+                            pass
+                    html = _read_html(page)
+                    _raise_if_session_expired(status, final_url, html, url)
+                    results.append({"url": url, "html": html, "error": None, "session_expired": False})
+                except SessionExpiredError as exc:
+                    results.append({"url": url, "html": "", "error": exc, "session_expired": True})
+                    break
+                except Exception as exc:  # noqa: BLE001 - record and continue
+                    results.append({"url": url, "html": "", "error": exc, "session_expired": False})
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+    return results
+
+
 def capture_page(
     page_url: str,
     profile_dir: str,
@@ -457,7 +549,7 @@ def capture_page(
         raise SessionExpiredError(
             f"No persisted browser profile at {profile_dir}. Run assisted login first."
         )
-    with sync_playwright() as pw:
+    with _profile_lock(profile_dir), sync_playwright() as pw:
         context = _launch_persistent_context(pw, profile_dir, headless=headless)
         _restore_session_state(context, profile_dir)
         try:
@@ -529,7 +621,7 @@ def download_document_links_headed(
         "errors": [],
     }
 
-    with sync_playwright() as pw:
+    with _profile_lock(profile_dir), sync_playwright() as pw:
         context = _launch_persistent_context(
             pw, profile_dir, headless=False, accept_downloads=True
         )

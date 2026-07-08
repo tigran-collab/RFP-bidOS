@@ -62,6 +62,17 @@ def test_helpers_raise_clear_error_when_missing(no_playwright):
         )
 
 
+def test_profile_lock_is_stable_per_dir():
+    # The per-profile lock serializes concurrent persistent-context launches on
+    # the same on-disk profile (assisted login vs a scrape/portal download). The
+    # same dir must always return the SAME lock; different dirs get distinct ones.
+    lock_a = browser_session._profile_lock("/tmp/profiles/1")
+    lock_a_again = browser_session._profile_lock("/tmp/profiles/1/")
+    lock_b = browser_session._profile_lock("/tmp/profiles/2")
+    assert lock_a is lock_a_again
+    assert lock_a is not lock_b
+
+
 def test_adapter_degrades_when_playwright_missing(no_playwright):
     source = SimpleNamespace(
         id=7,

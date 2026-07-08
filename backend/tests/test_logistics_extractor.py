@@ -47,3 +47,38 @@ def test_apply_logistics_overwrites_when_extraction_finds_values(session):
     assert opportunity.submission_portal == "Bonfire"
     assert opportunity.submission_method == "Electronic (Bonfire)"
     assert opportunity.required_forms_summary == "Bid Form"
+
+
+def test_apply_logistics_preserves_operator_due_date(session):
+    # An operator-corrected due date must survive extract-logistics even when
+    # the document text yields a different (regex-extracted) date.
+    opportunity = Opportunity(
+        title="Security Guard Services RFP",
+        due_date=datetime(2026, 9, 1),
+        review_notes="Proposals due: 08/15/2026 at 2:00 PM",
+    )
+    session.add(opportunity)
+    session.commit()
+    session.refresh(opportunity)
+
+    apply_logistics_to_opportunity(opportunity.id, session)
+
+    session.refresh(opportunity)
+    assert opportunity.due_date == datetime(2026, 9, 1)
+
+
+def test_apply_logistics_fills_empty_due_date(session):
+    # With no stored due date, the extracted one fills the empty field.
+    opportunity = Opportunity(
+        title="Security Guard Services RFP",
+        review_notes="Proposals due: 08/15/2026 at 2:00 PM",
+    )
+    session.add(opportunity)
+    session.commit()
+    session.refresh(opportunity)
+
+    apply_logistics_to_opportunity(opportunity.id, session)
+
+    session.refresh(opportunity)
+    assert opportunity.due_date is not None
+    assert opportunity.due_date.month == 8 and opportunity.due_date.day == 15

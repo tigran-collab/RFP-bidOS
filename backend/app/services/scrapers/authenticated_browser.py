@@ -51,6 +51,7 @@ from app.services.scrapers.browser_session import (
     PlaywrightNotInstalledError,
     SessionExpiredError,
     fetch_authenticated_html,
+    fetch_authenticated_html_batch,
     playwright_available,
 )
 from app.services.scrapers.extraction_utils import (
@@ -199,39 +200,67 @@ class AuthenticatedBrowserAdapter:
         List rows carry little beyond title/due date, and on multi-agency
         portals the agency fallback is the PORTAL name — the issuing agency,
         location, service/contract type, value, and description all live on
-        the detail page. Per-page failures are diagnostics, never fatal.
+        the detail page.
+
+        All detail pages are fetched inside ONE reused browser context (see
+        ``fetch_authenticated_html_batch``) with a small politeness delay
+        between pages, instead of launching a fresh browser per page. Per-page
+        failures are diagnostics, never fatal; a session that expires mid-batch
+        stops enrichment.
         """
         limit = int(config.get("detail_limit") or 10)
+        throttle = float(config.get("detail_throttle_seconds", 0.5) or 0.0)
         list_url = config.get("list_url")
         replace_values = {value for value in (agency_fallback,) if value}
-        enriched = 0
+
+        # Collect the candidates that have a distinct detail page, capped.
+        pending: list[tuple[ScraperResult, str]] = []
+        eligible = 0
         for result in results:
-            if enriched >= limit:
-                self.diagnostics.append(
-                    f"Detail enrichment capped at {limit} page(s); "
-                    f"{len(results) - enriched} candidate(s) left unenriched."
-                )
-                break
             url = result.detail_url or result.source_url
             if not url or url == list_url:
                 continue
-            try:
-                detail_html = fetch_authenticated_html(
-                    url,
-                    profile_dir,
-                    wait_selector=config.get("detail_wait_selector"),
-                    timeout_seconds=self.timeout,
-                    headless=fetch_headless,
-                )
-            except SessionExpiredError as exc:
-                self.diagnostics.append(
-                    f"Detail enrichment stopped: session expired ({exc})"
-                )
-                break
-            except Exception as exc:  # noqa: BLE001 - enrich what we can
-                self.diagnostics.append(f"Detail enrichment failed for {url}: {exc}")
+            eligible += 1
+            if len(pending) < limit:
+                pending.append((result, url))
+        if eligible > len(pending):
+            self.diagnostics.append(
+                f"Detail enrichment capped at {limit} page(s); "
+                f"{eligible - len(pending)} candidate(s) left unenriched."
+            )
+        if not pending:
+            return
+
+        try:
+            fetched = fetch_authenticated_html_batch(
+                [url for _, url in pending],
+                profile_dir,
+                wait_selector=config.get("detail_wait_selector"),
+                timeout_seconds=self.timeout,
+                headless=fetch_headless,
+                throttle_seconds=throttle,
+            )
+        except SessionExpiredError as exc:
+            self.diagnostics.append(
+                f"Detail enrichment stopped: session expired ({exc})"
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+            self.diagnostics.append(f"Detail enrichment failed: {exc}")
+            return
+
+        enriched = 0
+        for (result, url), page in zip(pending, fetched):
+            error = page.get("error")
+            if error is not None:
+                if page.get("session_expired"):
+                    self.diagnostics.append(
+                        f"Detail enrichment stopped: session expired ({error})"
+                    )
+                    break
+                self.diagnostics.append(f"Detail enrichment failed for {url}: {error}")
                 continue
-            text = BeautifulSoup(detail_html, "html.parser").get_text(" ", strip=True)
+            text = BeautifulSoup(page.get("html") or "", "html.parser").get_text(" ", strip=True)
             enrich_result_from_text(result, text, replace_agency_values=replace_values)
             result.extraction_method = f"{result.extraction_method or 'authenticated_browser'}+detail"
             enriched += 1

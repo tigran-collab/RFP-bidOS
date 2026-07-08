@@ -305,11 +305,13 @@ def extract_logistics_from_opportunity(opportunity: Opportunity, session) -> dic
     combined = f"{metadata_text}\n\n{parsed_text}"[:MAX_TEXT_CHARS]
     result = extract_logistics_from_text(combined)
 
-    # Prefer the freshly extracted due date; fall back to the existing
-    # structured value from scraping when the text gave none.
-    due_date = result["due_date"] or opportunity.due_date
-    q_and_a = result["q_and_a_deadline"] or opportunity.q_and_a_deadline
-    pre_bid = result["pre_bid_date"] or opportunity.pre_bid_date
+    # Preserve any stored deadline (an operator may have hand-corrected it, and
+    # the scrape's structured value is usually more reliable than a regex hit
+    # from run-together document text). Only fall back to the freshly extracted
+    # date to FILL a field that is currently empty.
+    due_date = opportunity.due_date or result["due_date"]
+    q_and_a = opportunity.q_and_a_deadline or result["q_and_a_deadline"]
+    pre_bid = opportunity.pre_bid_date or result["pre_bid_date"]
     pre_bid_mandatory = (
         result["pre_bid_mandatory"]
         if result["pre_bid_mandatory"] is not None

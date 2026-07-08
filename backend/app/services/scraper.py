@@ -96,7 +96,7 @@ def scrape_source(source_config) -> dict:
                 result["created_count"] += 1
                 continue
 
-            updated = _update_opportunity_if_safe(existing, candidate)
+            updated = _update_opportunity_if_safe(existing, candidate, source_config)
             doc_counts = _attach_document_urls(session, existing, candidate.document_urls)
             result["documents_discovered"] += doc_counts["discovered"]
             result["documents_skipped"] += doc_counts["skipped"]
@@ -292,9 +292,21 @@ def _auth_skip_message(source_config) -> str | None:
 
 
 def _find_existing_opportunity(session: Session, candidate: ScraperResult, source_config):
+    # Match on a genuinely row-distinct URL only. A listing whose rows carry no
+    # anchor collapses every row's source_url onto the shared list/base URL (see
+    # table_parser: `source_url = detail_url or base_url`). Deduping on that
+    # shared URL would make rows 2..N "match" row 1, so N real bids become one
+    # opportunity plus N-1 phantom "duplicates". Exclude the list/base URL here
+    # and fall through to solicitation-number / title matching (both scoped to
+    # the source) so distinct anchor-less bids each get created.
+    list_urls = {
+        url
+        for url in (getattr(source_config, "base_url", None), candidate.portal_url)
+        if url
+    }
     urls = {candidate.source_url, candidate.detail_url}
     urls.discard(None)
-    for url in urls:
+    for url in urls - list_urls:
         existing = session.exec(select(Opportunity).where(Opportunity.source_url == url)).first()
         if existing is not None:
             return existing
@@ -337,6 +349,7 @@ def _create_opportunity(candidate: ScraperResult, source_config) -> Opportunity:
         service_type=candidate.service_type,
         contract_type=candidate.contract_type,
         estimated_value=candidate.estimated_value,
+        description=candidate.description,
         status="Needs Review",
         bid_decision="Needs Review",
         review_status=(
@@ -356,7 +369,9 @@ def _create_opportunity(candidate: ScraperResult, source_config) -> Opportunity:
     )
 
 
-def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResult) -> bool:
+def _update_opportunity_if_safe(
+    opportunity: Opportunity, candidate: ScraperResult, source_config=None
+) -> bool:
     updated = False
     safe_fields = (
         "agency",
@@ -369,6 +384,10 @@ def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResu
         "service_type",
         "contract_type",
         "estimated_value",
+        # Detail-page enrichment builds a description (up to 600 chars); without
+        # it here the enriched text is discarded on every re-scrape and the UI /
+        # scorer / AI keep seeing a blank field.
+        "description",
     )
     for field in safe_fields:
         if getattr(opportunity, field) in (None, "") and getattr(candidate, field) not in (None, ""):
@@ -377,9 +396,73 @@ def _update_opportunity_if_safe(opportunity: Opportunity, candidate: ScraperResu
     if not opportunity.source_url and (candidate.detail_url or candidate.source_url):
         opportunity.source_url = candidate.detail_url or candidate.source_url
         updated = True
-    relevance_updated = _update_relevance_metadata(opportunity, candidate)
-    updated = updated or relevance_updated
+    if _replace_fallback_agency(opportunity, candidate, source_config):
+        updated = True
+    if not _relevance_is_locked(opportunity):
+        relevance_updated = _update_relevance_metadata(opportunity, candidate)
+        updated = updated or relevance_updated
     return updated
+
+
+def _relevance_is_locked(opportunity: Opportunity) -> bool:
+    """True when an operator has triaged this row and its relevance is set.
+
+    A re-scrape must not rewrite relevance_score/decision/warning once a human
+    has reviewed the row — otherwise an operator can never durably correct a
+    wrong call, and enrichment-cap oscillation (a bid enriched one day, capped
+    the next) flips these fields day to day. New / untriaged rows still refresh.
+    """
+    human_reviewed = (
+        opportunity.reviewed_at is not None
+        or opportunity.review_status not in ("New", "Needs Review")
+    )
+    has_relevance = (
+        opportunity.relevance_decision is not None
+        or opportunity.relevance_score is not None
+    )
+    return human_reviewed and has_relevance
+
+
+def _replace_fallback_agency(
+    opportunity: Opportunity, candidate: ScraperResult, source_config
+) -> bool:
+    """Let enrichment's issuing agency replace a stored portal-name fallback.
+
+    Records created before detail-page enrichment stored the PORTAL name as
+    agency (the source name / config agency fallback). ``_update_*`` never
+    touches non-empty fields, so that placeholder would stick forever. Narrow
+    exception: if the stored agency is exactly one of those fallbacks and the
+    candidate now carries a real (different) issuing agency, replace it.
+    """
+    fallbacks = _agency_fallback_values(source_config)
+    if (
+        candidate.agency
+        and opportunity.agency in fallbacks
+        and candidate.agency not in fallbacks
+    ):
+        opportunity.agency = candidate.agency
+        return True
+    return False
+
+
+def _agency_fallback_values(source_config) -> set[str]:
+    values: set[str] = set()
+    if source_config is None:
+        return values
+    name = getattr(source_config, "name", None)
+    if name:
+        values.add(name)
+    raw = getattr(source_config, "config_json", None)
+    if raw:
+        config = raw if isinstance(raw, dict) else None
+        if config is None:
+            try:
+                config = json.loads(raw)
+            except (TypeError, ValueError):
+                config = None
+        if isinstance(config, dict) and config.get("agency"):
+            values.add(config["agency"])
+    return values
 
 
 def _update_relevance_metadata(opportunity: Opportunity, candidate: ScraperResult) -> bool:

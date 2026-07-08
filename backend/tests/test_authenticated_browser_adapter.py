@@ -98,6 +98,21 @@ def test_can_handle_only_authenticated_browser():
     assert adapter.can_handle(SimpleNamespace(source_type="planetbids")) is False
 
 
+def _batch_returning(html_by_url):
+    """Build a fetch_authenticated_html_batch stub from a url->html callable/map."""
+
+    def fake_batch(
+        urls, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, throttle_seconds=0.0
+    ):
+        resolve = html_by_url if callable(html_by_url) else (lambda u: html_by_url)
+        return [
+            {"url": url, "html": resolve(url), "error": None, "session_expired": False}
+            for url in urls
+        ]
+
+    return fake_batch
+
+
 def test_row_field_map_extraction(monkeypatch):
     _force_playwright(monkeypatch)
     fetched = []
@@ -106,7 +121,18 @@ def test_row_field_map_extraction(monkeypatch):
         fetched.append({"page_url": page_url, "wait_selector": wait_selector})
         return ROW_HTML
 
+    batched = {}
+
+    def fake_batch(urls, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, throttle_seconds=0.0):
+        batched["urls"] = list(urls)
+        batched["throttle_seconds"] = throttle_seconds
+        return [
+            {"url": url, "html": ROW_HTML, "error": None, "session_expired": False}
+            for url in urls
+        ]
+
     monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html_batch", fake_batch)
 
     adapter = AuthenticatedBrowserAdapter()
     results = adapter.scrape(make_source(ROW_CONFIG))
@@ -124,8 +150,10 @@ def test_row_field_map_extraction(monkeypatch):
     assert bid.extraction_method == "authenticated_browser_row+detail"
     assert fetched[0]["wait_selector"] == "table.bids"
     assert fetched[0]["page_url"] == "https://portal.example.com/bids"
-    # The candidate's detail page was visited for enrichment.
-    assert fetched[1]["page_url"] == bid.detail_url
+    # The list page was fetched once (singly); detail pages went through the
+    # single-context batch, which received exactly the candidate's detail URL.
+    assert len(fetched) == 1
+    assert batched["urls"] == [bid.detail_url]
 
 
 def test_table_parser_fallback(monkeypatch):
@@ -134,6 +162,11 @@ def test_table_parser_fallback(monkeypatch):
         authenticated_browser,
         "fetch_authenticated_html",
         lambda *a, **k: TABLE_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(TABLE_HTML),
     )
     adapter = AuthenticatedBrowserAdapter()
     results = adapter.scrape(make_source(TABLE_CONFIG))
@@ -151,10 +184,14 @@ def test_table_parser_fallback(monkeypatch):
 def test_detail_enrichment_fills_breakdown_fields(monkeypatch):
     _force_playwright(monkeypatch)
 
-    def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, **kwargs):
-        return TABLE_HTML if page_url == TABLE_CONFIG["list_url"] else DETAIL_HTML
-
-    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: TABLE_HTML
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(DETAIL_HTML),
+    )
     adapter = AuthenticatedBrowserAdapter()
     results = adapter.scrape(make_source(TABLE_CONFIG))
 
@@ -174,17 +211,59 @@ def test_detail_enrichment_fills_breakdown_fields(monkeypatch):
     assert any("enriched 1 candidate" in d for d in adapter.diagnostics)
 
 
-def test_detail_enrichment_stops_on_session_expiry(monkeypatch):
+def test_detail_enrichment_uses_single_batch_call(monkeypatch):
+    # Two candidates -> the detail pages are fetched with ONE batch call (one
+    # reused browser context), and the configured throttle is passed through.
     _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: ROW_HTML
+    )
     calls = []
 
-    def fake_fetch(page_url, profile_dir, **kwargs):
-        calls.append(page_url)
-        if page_url == TABLE_CONFIG["list_url"]:
-            return TABLE_HTML
-        raise SessionExpiredError("expired mid-enrichment")
+    def fake_batch(urls, profile_dir, wait_selector=None, timeout_seconds=45, headless=True, throttle_seconds=0.0):
+        calls.append({"urls": list(urls), "throttle_seconds": throttle_seconds})
+        return [
+            {"url": url, "html": DETAIL_HTML, "error": None, "session_expired": False}
+            for url in urls
+        ]
 
-    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html_batch", fake_batch)
+
+    config = dict(ROW_CONFIG)
+    config["row_selector"] = "table.bids tbody tr.bid"
+    config["detail_throttle_seconds"] = 1.5
+    # Give both rows a distinct title so neither is dropped.
+    html_two_rows = ROW_HTML.replace('<td class="title"></td>', '<td class="title"><a href="/bids/RFP-2026-015">Armed Guard Services</a></td>')
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: html_two_rows
+    )
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert len(results) == 2
+    assert len(calls) == 1
+    assert len(calls[0]["urls"]) == 2
+    assert calls[0]["throttle_seconds"] == 1.5
+
+
+def test_detail_enrichment_stops_on_session_expiry(monkeypatch):
+    _force_playwright(monkeypatch)
+
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: TABLE_HTML
+    )
+
+    def fake_batch(urls, *a, **k):
+        return [
+            {
+                "url": urls[0],
+                "html": "",
+                "error": SessionExpiredError("expired mid-enrichment"),
+                "session_expired": True,
+            }
+        ]
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html_batch", fake_batch)
     adapter = AuthenticatedBrowserAdapter()
     results = adapter.scrape(make_source(TABLE_CONFIG))
 

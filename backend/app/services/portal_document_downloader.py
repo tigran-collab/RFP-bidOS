@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -57,10 +58,15 @@ def download_portal_documents_headed(opportunity_id: int, session: Session) -> d
     profile_dir = str(BROWSER_PROFILE_ROOT / str(source.id))
     config = _load_source_config(source)
     download_config = _download_config(config)
-    temp_dir = DOWNLOAD_ROOT / f"opportunity_{opportunity_id}" / ".portal_downloads"
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    # A unique staging dir per run: two concurrent downloads of the SAME
+    # opportunity previously shared one ".portal_downloads" dir that each wiped
+    # on entry, deleting the other run's in-flight files. mkdtemp guarantees a
+    # distinct dir, so concurrent runs never clobber each other.
+    opportunity_dir = DOWNLOAD_ROOT / f"opportunity_{opportunity_id}"
+    opportunity_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(
+        tempfile.mkdtemp(prefix=".portal_downloads_", dir=str(opportunity_dir))
+    )
 
     def _run_download() -> dict:
         return browser_session.download_document_links_headed(

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from sqlmodel import Session
 
@@ -88,6 +89,38 @@ def test_headed_portal_download_registers_files(session, tmp_path, monkeypatch):
     assert document.sha256
     assert document.parsed_status == "Not Parsed"
     assert (tmp_path / f"opportunity_{opportunity.id}" / "rfp.pdf").exists()
+
+
+def test_download_runs_use_unique_temp_dirs(session, tmp_path, monkeypatch):
+    # Two downloads of the SAME opportunity must stage into DISTINCT temp dirs
+    # so concurrent runs never delete each other's in-flight files (the old
+    # code wiped one shared ".portal_downloads" dir on entry).
+    _source, opportunity = _seed_portal_opportunity(session)
+    monkeypatch.setattr(portal_downloader, "DOWNLOAD_ROOT", tmp_path)
+
+    seen_dirs: list[str] = []
+
+    def fake_browser_download(page_url, profile_dir, output_dir, **kwargs):
+        seen_dirs.append(output_dir)
+        assert Path(output_dir).is_dir()
+        return {
+            "candidates_found": 0,
+            "downloads_attempted": 0,
+            "downloaded_files": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(
+        portal_downloader.browser_session,
+        "download_document_links_headed",
+        fake_browser_download,
+    )
+
+    portal_downloader.download_portal_documents_headed(opportunity.id, session)
+    portal_downloader.download_portal_documents_headed(opportunity.id, session)
+
+    assert len(seen_dirs) == 2
+    assert seen_dirs[0] != seen_dirs[1]
 
 
 def test_headed_portal_download_requires_portal_source(session):
