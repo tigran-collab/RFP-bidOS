@@ -34,7 +34,7 @@ from app.services.ai_evaluator import (
 )
 from app.services.ai_summary import summarize_opportunity
 from app.services.downloader import download_documents_for_opportunity
-from app.services.parser import parse_documents_for_opportunity
+from app.services.parser import STATUS_NOT_DOWNLOADED, parse_documents_for_opportunity
 from app.services.portal_document_downloader import download_portal_documents_headed
 from app.services.scraper import discover_documents_for_opportunity
 from app.services.requirement_extractor import (
@@ -63,6 +63,11 @@ from app.services.prioritization import apply_priority_to_all
 from app.utils.dates import to_naive_utc
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
+
+# Mirrors the invalid-JSON error string returned by
+# ai_evaluator.evaluate_opportunity_with_local_ai so the /ai-evaluate handler
+# can map it to the same HTTP status /extract-requirements uses for INVALID_JSON.
+AI_EVALUATE_INVALID_JSON = "Local AI model returned invalid JSON."
 
 
 def utc_now() -> datetime:
@@ -376,8 +381,14 @@ def ai_evaluate_opportunity(opportunity_id: int) -> dict:
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
         result = evaluate_opportunity_with_local_ai(opportunity_id, session)
-        if result.get("error") == LOCAL_AI_UNAVAILABLE:
+        error = result.get("error")
+        if error == LOCAL_AI_UNAVAILABLE:
             raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        # Mirror /extract-requirements: an invalid-JSON model response is a
+        # 502, not a silent HTTP 200 carrying an {"error": ...} body. The
+        # success shape (result["opportunity"]/["evaluation"]) is unchanged.
+        if error == AI_EVALUATE_INVALID_JSON:
+            raise HTTPException(status_code=502, detail=AI_EVALUATE_INVALID_JSON)
         return result
 
 
@@ -476,7 +487,7 @@ def attach_manual_document_url(opportunity_id: int, payload: ManualDocumentUrlRe
             path="",
             file_type=suffix,
             source_url=url,
-            parsed_status="Not Downloaded",
+            parsed_status=STATUS_NOT_DOWNLOADED,
         )
         session.add(document)
         session.commit()
@@ -492,7 +503,10 @@ def attach_manual_document_url(opportunity_id: int, payload: ManualDocumentUrlRe
 
 @router.post("/{opportunity_id}/download-documents")
 def download_opportunity_documents(opportunity_id: int) -> dict:
-    with Session(engine) as session:
+    # expire_on_commit=False: each per-document commit inside the batch would
+    # otherwise expire previously-refreshed Document instances, so every entry
+    # but the last serialized as {} once the session closed. See H4.
+    with Session(engine, expire_on_commit=False) as session:
         opportunity = session.get(Opportunity, opportunity_id)
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
@@ -522,7 +536,9 @@ def download_opportunity_portal_documents(opportunity_id: int) -> dict:
 
 @router.post("/{opportunity_id}/parse-documents")
 def parse_opportunity_documents(opportunity_id: int) -> dict:
-    with Session(engine) as session:
+    # expire_on_commit=False so each parsed Document stays populated after the
+    # per-document commits; otherwise all but the last serialize as {}. See H4.
+    with Session(engine, expire_on_commit=False) as session:
         opportunity = session.get(Opportunity, opportunity_id)
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")

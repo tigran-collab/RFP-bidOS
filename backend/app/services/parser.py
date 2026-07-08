@@ -11,6 +11,17 @@ from app.models import Document
 PDF_TYPES = {"pdf", ".pdf", "application/pdf"}
 TXT_TYPES = {"txt", ".txt", "text/plain"}
 
+# Canonical parsed_status vocabulary. Every writer (downloader, portal
+# downloader, manual URL attach, scraper) must use these exact strings so the
+# status checks elsewhere (dashboard, logistics QA) cannot silently miss a
+# value because a writer spelled it differently.
+STATUS_NOT_DOWNLOADED = "Not Downloaded"
+STATUS_NOT_PARSED = "Not Parsed"
+STATUS_PARSED = "Parsed"
+STATUS_PARSED_NO_TEXT = "Parsed (No Text)"
+STATUS_PARSE_FAILED = "Parse Failed"
+STATUS_UNSUPPORTED = "Unsupported File Type"
+
 # Minimum count of real (non-header, non-whitespace) characters for a parse to
 # count as having usable text. Below this we treat the PDF as empty/scanned.
 MIN_REAL_TEXT_CHARS = 20
@@ -28,11 +39,11 @@ def _parsed_status_for_output(output_path: Path) -> str:
     try:
         text = output_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return "Parsed"
+        return STATUS_PARSED
     real_text = _PAGE_HEADER_RE.sub("", text)
     if len(real_text.strip()) < MIN_REAL_TEXT_CHARS:
-        return "Parsed (No Text)"
-    return "Parsed"
+        return STATUS_PARSED_NO_TEXT
+    return STATUS_PARSED
 
 
 def parse_pdf_to_text(document_id: int, session) -> dict:
@@ -51,16 +62,16 @@ def parse_pdf_to_text(document_id: int, session) -> dict:
                 f"pypdf failed: {pypdf_exc}; "
                 f"PyMuPDF fallback failed: {pymupdf_exc}"
             )
-            document.parsed_status = "Parse Failed"
+            document.parsed_status = STATUS_PARSE_FAILED
             document.parsed_at = _utc_now()
             session.add(document)
             session.commit()
             return _result(
                 document_id=document_id,
-                status="Parse Failed",
+                status=STATUS_PARSE_FAILED,
                 errors=[parse_error],
                 parse_error=parse_error,
-                parsed_status="Parse Failed",
+                parsed_status=STATUS_PARSE_FAILED,
             )
 
     parsed_status = _parsed_status_for_output(output_path)
@@ -92,10 +103,10 @@ def parse_document(document_id: int, session) -> dict:
     if not document.path or not Path(document.path).exists():
         return _result(
             document_id=document_id,
-            status="Not Downloaded",
+            status=STATUS_NOT_DOWNLOADED,
             skipped_count=1,
             documents=[document],
-            parsed_status=document.parsed_status or "Not Downloaded",
+            parsed_status=document.parsed_status or STATUS_NOT_DOWNLOADED,
         )
 
     file_type = (document.file_type or Path(document.path).suffix).lower()
@@ -104,17 +115,27 @@ def parse_document(document_id: int, session) -> dict:
     if file_type in TXT_TYPES:
         return _parse_txt_to_text(document, session)
 
-    document.parsed_status = "Unsupported File Type"
+    # The recorded type is missing or unrecognized (e.g. a PDF served from
+    # ".../download?id=3" as application/octet-stream with no extension). Sniff
+    # the file's magic bytes before rejecting it, so genuinely parseable files
+    # are not marked "Unsupported File Type" purely on a bad/absent extension.
+    sniffed = _sniff_file_type(document.path)
+    if sniffed == "pdf":
+        return parse_pdf_to_text(document_id, session)
+    if sniffed == "txt":
+        return _parse_txt_to_text(document, session)
+
+    document.parsed_status = STATUS_UNSUPPORTED
     document.parsed_at = _utc_now()
     session.add(document)
     session.commit()
     session.refresh(document)
     return _result(
         document_id=document_id,
-        status="Unsupported File Type",
+        status=STATUS_UNSUPPORTED,
         skipped_count=1,
         documents=[document],
-        parsed_status="Unsupported File Type",
+        parsed_status=STATUS_UNSUPPORTED,
     )
 
 
@@ -164,16 +185,16 @@ def _parse_txt_to_text(document: Document, session) -> dict:
             parsed_status=parsed_status,
         )
     except Exception as exc:
-        document.parsed_status = "Parse Failed"
+        document.parsed_status = STATUS_PARSE_FAILED
         document.parsed_at = _utc_now()
         session.add(document)
         session.commit()
         return _result(
             document_id=document.id,
-            status="Parse Failed",
+            status=STATUS_PARSE_FAILED,
             errors=[str(exc)],
             parse_error=str(exc),
-            parsed_status="Parse Failed",
+            parsed_status=STATUS_PARSE_FAILED,
         )
 
 
@@ -207,6 +228,36 @@ def _parse_pdf_with_pymupdf(input_path: str, output_path: Path) -> tuple[str, in
                 output.write(page.get_text())
                 output.write("\n\n")
     return "pymupdf", page_count
+
+
+def _sniff_file_type(path: str) -> str | None:
+    """Best-effort content sniff for files whose extension/type is unknown.
+
+    Returns "pdf" or "txt" when the leading bytes clearly identify a parseable
+    format, else None. Only used as a fallback for files that would otherwise
+    be rejected, so it must not misclassify binaries as text.
+    """
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(1024)
+    except OSError:
+        return None
+    if not header:
+        return None
+    if header.startswith(b"%PDF-"):
+        return "pdf"
+    # ZIP-family containers (docx/xlsx/pptx/zip) start with "PK\x03\x04"; the
+    # parser has no extractor for them, so they stay unsupported.
+    if header.startswith(b"PK\x03\x04"):
+        return None
+    # Plain-text heuristic: no NUL bytes and cleanly UTF-8 decodable.
+    if b"\x00" in header:
+        return None
+    try:
+        header.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return "txt"
 
 
 def _output_path(document: Document) -> Path:

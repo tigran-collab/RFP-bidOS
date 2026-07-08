@@ -16,7 +16,10 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.post("/parse-all")
 def parse_all_downloaded_documents() -> dict:
-    with Session(engine) as session:
+    # expire_on_commit=False so every parsed Document in the returned list stays
+    # populated after the per-document commits (otherwise all but the last
+    # serialize as {} once the session closes). See H4.
+    with Session(engine, expire_on_commit=False) as session:
         return parse_all_documents(session)
 
 
@@ -28,7 +31,9 @@ def list_documents() -> list[Document]:
 
 @router.post("/{document_id}/parse")
 def parse_document_by_id(document_id: int) -> dict:
-    with Session(engine) as session:
+    # expire_on_commit=False so the returned Document stays populated even when
+    # the handler performs more than one commit (e.g. dedup paths). See H4.
+    with Session(engine, expire_on_commit=False) as session:
         document = session.get(Document, document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -37,7 +42,9 @@ def parse_document_by_id(document_id: int) -> dict:
 
 @router.post("/{document_id}/download")
 def download_document_file(document_id: int) -> dict:
-    with Session(engine) as session:
+    # expire_on_commit=False: the hash-dedup path commits after appending the
+    # matched Document, which would otherwise expire it into {}. See H4.
+    with Session(engine, expire_on_commit=False) as session:
         document = session.get(Document, document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found")

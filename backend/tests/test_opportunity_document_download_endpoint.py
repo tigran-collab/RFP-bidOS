@@ -128,3 +128,10 @@ class _FakeResponse:
 
     def raise_for_status(self):
         return None
+
+    def iter_content(self, chunk_size=65536):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start : start + chunk_size]
+
+    def close(self):
+        return None

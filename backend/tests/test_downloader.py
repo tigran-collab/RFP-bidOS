@@ -10,11 +10,20 @@ from app.services import downloader
 
 
 class _FakeResponse:
-    def __init__(self, content, content_type="application/pdf"):
+    def __init__(self, content, content_type="application/pdf", extra_headers=None):
         self.content = content
         self.headers = {"Content-Type": content_type}
+        if extra_headers:
+            self.headers.update(extra_headers)
 
     def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=65536):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start : start + chunk_size]
+
+    def close(self):
         return None
 
 
@@ -116,3 +125,131 @@ def test_stale_document_path_is_redownloaded(session, tmp_path, monkeypatch):
     session.refresh(stale)
     assert stale.path
     assert downloader.resolve_downloaded_document_path(stale).exists()
+
+
+def test_hash_match_with_missing_file_repoints_new_download(session, tmp_path, monkeypatch):
+    """M1: a stale hash-match whose file is gone must be repointed, not deleted.
+
+    Deleting the freshly downloaded file and keeping the broken record caused an
+    infinite re-download/skip loop.
+    """
+    monkeypatch.setattr(downloader, "DOWNLOAD_ROOT", tmp_path)
+    opportunity = _seed_opportunity(session)
+    url = "https://example.com/docs/report.pdf"
+    content = b"%PDF-1.4 shared body"
+    monkeypatch.setattr(
+        downloader.requests, "get", lambda u, **kwargs: _FakeResponse(content)
+    )
+
+    first = downloader.download_document(url, opportunity.id, session)
+    assert first["downloaded_count"] == 1
+    document = first["documents"][0]
+
+    # The recorded file disappears and its name no longer matches what the URL
+    # yields, so the re-download lands at a different path than the stale record.
+    downloader.resolve_downloaded_document_path(document).unlink()
+    document.path = str(tmp_path / f"opportunity_{opportunity.id}" / "gone.pdf")
+    session.add(document)
+    session.commit()
+
+    result = downloader.download_document(url, opportunity.id, session)
+    assert result["downloaded_count"] == 1  # repointed, not unlinked into a loop
+
+    documents = list(
+        session.exec(
+            select(Document).where(Document.opportunity_id == opportunity.id)
+        ).all()
+    )
+    assert len(documents) == 1
+    assert downloader.resolve_downloaded_document_path(documents[0]) is not None
+
+
+def test_unsupported_content_type_marked_terminal_and_not_refetched(
+    session, tmp_path, monkeypatch
+):
+    """H5: unsupported types are rejected without buffering and never re-fetched."""
+    monkeypatch.setattr(downloader, "DOWNLOAD_ROOT", tmp_path)
+    opportunity = _seed_opportunity(session)
+    pending = Document(
+        opportunity_id=opportunity.id,
+        filename="",
+        path="",
+        source_url="https://example.com/landing-page",
+    )
+    session.add(pending)
+    session.commit()
+
+    calls = {"n": 0}
+
+    def fake_get(url, **kwargs):
+        calls["n"] += 1
+        return _FakeResponse(b"<html>not a document</html>", content_type="text/html")
+
+    monkeypatch.setattr(downloader.requests, "get", fake_get)
+
+    first = downloader.download_documents_for_opportunity(opportunity.id, session)
+    assert first["downloaded_count"] == 0
+    session.refresh(pending)
+    assert pending.parsed_status == downloader.STATUS_UNSUPPORTED_DOWNLOAD
+    assert calls["n"] == 1
+
+    # A terminally-marked document must not be fetched again on the next run.
+    downloader.download_documents_for_opportunity(opportunity.id, session)
+    assert calls["n"] == 1
+
+
+def test_oversized_content_length_rejected_before_download(session, tmp_path, monkeypatch):
+    """H5: a declared over-limit size is rejected before any body is streamed."""
+    monkeypatch.setattr(downloader, "DOWNLOAD_ROOT", tmp_path)
+    opportunity = _seed_opportunity(session)
+    pending = Document(
+        opportunity_id=opportunity.id,
+        filename="",
+        path="",
+        source_url="https://example.com/docs/huge.pdf",
+    )
+    session.add(pending)
+    session.commit()
+
+    too_big = str(downloader.MAX_DOWNLOAD_BYTES + 1)
+    monkeypatch.setattr(
+        downloader.requests,
+        "get",
+        lambda url, **kwargs: _FakeResponse(
+            b"%PDF-1.4 tiny", extra_headers={"Content-Length": too_big}
+        ),
+    )
+
+    result = downloader.download_documents_for_opportunity(opportunity.id, session)
+    assert result["downloaded_count"] == 0
+    session.refresh(pending)
+    assert pending.parsed_status == downloader.STATUS_TOO_LARGE
+    assert not list(tmp_path.rglob("*.pdf"))
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_oversized_stream_aborts_and_deletes_partial(session, tmp_path, monkeypatch):
+    """H5: a body that grows past the cap mid-stream is aborted and cleaned up."""
+    monkeypatch.setattr(downloader, "DOWNLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(downloader, "MAX_DOWNLOAD_BYTES", 8)
+    opportunity = _seed_opportunity(session)
+    pending = Document(
+        opportunity_id=opportunity.id,
+        filename="",
+        path="",
+        source_url="https://example.com/docs/big.pdf",
+    )
+    session.add(pending)
+    session.commit()
+
+    body = b"%PDF-1.4 this body is far longer than eight bytes"
+    monkeypatch.setattr(
+        downloader.requests, "get", lambda url, **kwargs: _FakeResponse(body)
+    )
+
+    result = downloader.download_documents_for_opportunity(opportunity.id, session)
+    assert result["downloaded_count"] == 0
+    session.refresh(pending)
+    assert pending.parsed_status == downloader.STATUS_TOO_LARGE
+    assert not list(tmp_path.rglob("*.part"))
+    assert not list(tmp_path.rglob("*.pdf"))
