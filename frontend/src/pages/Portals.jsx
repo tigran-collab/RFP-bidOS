@@ -12,6 +12,7 @@ import {
   setSourceCredentials,
   setSourceEnabled,
   startPortalLogin,
+  updateSource,
 } from "../api.js";
 
 const loadError = "Failed to load portals. Is the backend running?";
@@ -35,12 +36,24 @@ function statusLabel(source, login) {
 
 function formatScrapeResult(result) {
   if (!result) return "";
+  if (result.errors?.length) {
+    return `${result.errors.length} error(s): ${result.errors.join("; ")}`;
+  }
   return (
     `${result.records_found ?? 0} kept, ` +
     `${result.created_count ?? 0} created, ` +
     `${result.updated_count ?? 0} updated, ` +
     `${result.skipped_duplicates ?? 0} duplicates skipped`
   );
+}
+
+function prettyConfig(value) {
+  if (!value) return "";
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 export default function Portals() {
@@ -54,14 +67,20 @@ export default function Portals() {
   // Add-a-portal form state.
   const [newTemplate, setNewTemplate] = useState("");
   const [newName, setNewName] = useState("");
+  const [newLoginUrl, setNewLoginUrl] = useState("");
+  const [newListUrl, setNewListUrl] = useState("");
   const [adding, setAdding] = useState(false);
 
   // Per-source expand + credential inputs + progress.
   const [expanded, setExpanded] = useState(null);
   const [creds, setCreds] = useState({}); // {id: {username, password}}
-  const [busy, setBusy] = useState({}); // {id: "saving"|"login"|"scrape"|"deleting"|"toggle"}
+  // {id: {saving|login|scrape|deleting|toggle|config: true}} — per-action flags so
+  // concurrent operations on one row (e.g. a scrape and a config save) don't
+  // clobber each other's busy state.
+  const [busy, setBusy] = useState({});
   const [loginStatus, setLoginStatus] = useState({}); // {id: statusObj}
   const [rowMessage, setRowMessage] = useState({}); // {id: string}
+  const [configEdits, setConfigEdits] = useState({}); // {id: {login_url, base_url, config_json}}
 
   const pollers = useRef({});
 
@@ -99,8 +118,13 @@ export default function Portals() {
     };
   }, []);
 
-  function setRowBusy(id, value) {
-    setBusy((current) => ({ ...current, [id]: value }));
+  function setRowBusy(id, action, active) {
+    setBusy((current) => {
+      const entry = { ...(current[id] || {}) };
+      if (active) entry[action] = true;
+      else delete entry[action];
+      return { ...current, [id]: entry };
+    });
   }
 
   function updateCred(id, field, value) {
@@ -108,6 +132,20 @@ export default function Portals() {
       ...current,
       [id]: { ...(current[id] || {}), [field]: value },
     }));
+  }
+
+  function updateConfig(id, field, value) {
+    setConfigEdits((current) => ({
+      ...current,
+      [id]: { ...(current[id] || {}), [field]: value },
+    }));
+  }
+
+  function configValue(source, field) {
+    const draft = configEdits[source.id] || {};
+    if (draft[field] !== undefined) return draft[field];
+    if (field === "config_json") return prettyConfig(source.config_json);
+    return source[field] || "";
   }
 
   async function refreshLoginStatus(id) {
@@ -131,9 +169,16 @@ export default function Portals() {
       const created = await addPortal({
         template: newTemplate || undefined,
         name: newName.trim(),
+        // Without a template the backend requires an explicit source type; every
+        // assisted-login portal uses the authenticated_browser adapter.
+        source_type: newTemplate ? undefined : "authenticated_browser",
+        login_url: newLoginUrl.trim() || undefined,
+        list_url: newListUrl.trim() || undefined,
       });
       setNewName("");
       setNewTemplate("");
+      setNewLoginUrl("");
+      setNewListUrl("");
       await loadAll();
       setExpanded(created.id);
       setMessage(`Added portal "${created.name}". Enter credentials to continue.`);
@@ -153,7 +198,7 @@ export default function Portals() {
       return;
     }
     try {
-      setRowBusy(source.id, "saving");
+      setRowBusy(source.id, "saving", true);
       await setSourceCredentials(source.id, {
         username,
         password: entry.password,
@@ -166,13 +211,13 @@ export default function Portals() {
     } catch (exc) {
       setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Failed to save credentials." }));
     } finally {
-      setRowBusy(source.id, "");
+      setRowBusy(source.id, "saving", false);
     }
   }
 
   async function handleDeleteCredentials(source) {
     try {
-      setRowBusy(source.id, "deleting");
+      setRowBusy(source.id, "deleting", true);
       await deleteSourceCredentials(source.id);
       updateCred(source.id, "username", "");
       updateCred(source.id, "password", "");
@@ -182,7 +227,7 @@ export default function Portals() {
     } catch (exc) {
       setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Failed to remove credentials." }));
     } finally {
-      setRowBusy(source.id, "");
+      setRowBusy(source.id, "deleting", false);
     }
   }
 
@@ -195,7 +240,7 @@ export default function Portals() {
 
   async function handleLogin(source) {
     try {
-      setRowBusy(source.id, "login");
+      setRowBusy(source.id, "login", true);
       setRowMessage((c) => ({
         ...c,
         [source.id]: "Opening browser — complete the login in the window that opened…",
@@ -204,7 +249,7 @@ export default function Portals() {
       setLoginStatus((current) => ({ ...current, [source.id]: status }));
       if (status.state === "failed") {
         setRowMessage((c) => ({ ...c, [source.id]: status.message }));
-        setRowBusy(source.id, "");
+        setRowBusy(source.id, "login", false);
         return;
       }
       // Poll login-status every ~2s until it settles (or 5 minutes pass).
@@ -213,7 +258,7 @@ export default function Portals() {
       pollers.current[source.id] = setInterval(async () => {
         if (Date.now() > pollDeadline) {
           stopPolling(source.id);
-          setRowBusy(source.id, "");
+          setRowBusy(source.id, "login", false);
           setRowMessage((c) => ({
             ...c,
             [source.id]:
@@ -225,7 +270,7 @@ export default function Portals() {
         if (!latest) return;
         if (["success", "expired", "failed"].includes(latest.state)) {
           stopPolling(source.id);
-          setRowBusy(source.id, "");
+          setRowBusy(source.id, "login", false);
           if (latest.state === "success") {
             setRowMessage((c) => ({ ...c, [source.id]: "✓ Session active." }));
             loadAll();
@@ -241,31 +286,77 @@ export default function Portals() {
       }, 2000);
     } catch (exc) {
       setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Failed to start login." }));
-      setRowBusy(source.id, "");
+      setRowBusy(source.id, "login", false);
     }
   }
 
   async function handleToggleEnabled(source) {
     try {
-      setRowBusy(source.id, "toggle");
+      setRowBusy(source.id, "toggle", true);
       await setSourceEnabled(source.id, !source.enabled);
       await loadAll();
     } catch (exc) {
       setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Failed to update." }));
     } finally {
-      setRowBusy(source.id, "");
+      setRowBusy(source.id, "toggle", false);
+    }
+  }
+
+  async function handleSaveConfig(source) {
+    const loginUrl = configValue(source, "login_url").trim();
+    const baseUrl = configValue(source, "base_url").trim();
+    const rawConfig = configValue(source, "config_json").trim();
+    let normalizedConfig = null;
+    if (rawConfig) {
+      try {
+        normalizedConfig = JSON.stringify(JSON.parse(rawConfig), null, 2);
+      } catch {
+        setRowMessage((c) => ({ ...c, [source.id]: "Config JSON is not valid." }));
+        return;
+      }
+    }
+    // Snapshot the draft as it was sent so keystrokes typed while the PATCH is
+    // in flight survive: afterwards we only drop draft fields that still match
+    // this snapshot.
+    const sentDraft = { ...(configEdits[source.id] || {}) };
+    try {
+      setRowBusy(source.id, "config", true);
+      await updateSource(source.id, {
+        login_url: loginUrl || null,
+        base_url: baseUrl || null,
+        config_json: normalizedConfig,
+      });
+      // Refresh sources first so clearing the draft never reveals stale values.
+      await loadAll();
+      setConfigEdits((current) => {
+        const entry = current[source.id];
+        if (!entry) return current;
+        const remaining = {};
+        for (const [field, value] of Object.entries(entry)) {
+          if (sentDraft[field] !== value) remaining[field] = value;
+        }
+        const next = { ...current };
+        if (Object.keys(remaining).length) next[source.id] = remaining;
+        else delete next[source.id];
+        return next;
+      });
+      setRowMessage((c) => ({ ...c, [source.id]: "Portal configuration saved." }));
+    } catch (exc) {
+      setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Failed to save configuration." }));
+    } finally {
+      setRowBusy(source.id, "config", false);
     }
   }
 
   async function handleScrape(source) {
     try {
-      setRowBusy(source.id, "scrape");
+      setRowBusy(source.id, "scrape", true);
       const result = await scrapeSource(source.id);
       setRowMessage((c) => ({ ...c, [source.id]: formatScrapeResult(result) }));
     } catch (exc) {
       setRowMessage((c) => ({ ...c, [source.id]: exc.message || "Scrape failed." }));
     } finally {
-      setRowBusy(source.id, "");
+      setRowBusy(source.id, "scrape", false);
     }
   }
 
@@ -309,6 +400,24 @@ export default function Portals() {
               onChange={(event) => setNewName(event.target.value)}
             />
           </label>
+          <label className="form-field">
+            Login URL
+            <input
+              type="url"
+              value={newLoginUrl}
+              placeholder="https://portal.example.gov/login"
+              onChange={(event) => setNewLoginUrl(event.target.value)}
+            />
+          </label>
+          <label className="form-field">
+            List URL
+            <input
+              type="url"
+              value={newListUrl}
+              placeholder="https://portal.example.gov/bids"
+              onChange={(event) => setNewListUrl(event.target.value)}
+            />
+          </label>
           <button className="primary-button" type="submit" disabled={adding}>
             {adding ? "Adding…" : "Add portal"}
           </button>
@@ -345,7 +454,7 @@ export default function Portals() {
           <tbody>
             {sources.map((source) => {
               const login = loginStatus[source.id];
-              const rowBusy = busy[source.id] || "";
+              const rowBusy = busy[source.id] || {};
               const isOpen = expanded === source.id;
               const entry = creds[source.id] || {};
               return (
@@ -368,7 +477,7 @@ export default function Portals() {
                         <input
                           type="checkbox"
                           checked={Boolean(source.enabled)}
-                          disabled={rowBusy === "toggle"}
+                          disabled={Boolean(rowBusy.toggle)}
                           onChange={() => handleToggleEnabled(source)}
                         />
                         {source.enabled ? "On" : "Off"}
@@ -388,10 +497,10 @@ export default function Portals() {
                         <button
                           className="primary-button"
                           type="button"
-                          disabled={!source.enabled || rowBusy === "scrape"}
+                          disabled={!source.enabled || rowBusy.scrape}
                           onClick={() => handleScrape(source)}
                         >
-                          {rowBusy === "scrape" ? "Scraping…" : "Scrape now"}
+                          {rowBusy.scrape ? "Scraping…" : "Scrape now"}
                         </button>
                       </div>
                     </td>
@@ -430,29 +539,74 @@ export default function Portals() {
                             <button
                               className="secondary-button"
                               type="button"
-                              disabled={rowBusy === "saving"}
+                              disabled={Boolean(rowBusy.saving)}
                               onClick={() => handleSaveCredentials(source)}
                             >
-                              {rowBusy === "saving" ? "Saving…" : "Save credentials"}
+                              {rowBusy.saving ? "Saving…" : "Save credentials"}
                             </button>
                             <button
                               className="primary-button"
                               type="button"
-                              disabled={rowBusy === "login"}
+                              disabled={Boolean(rowBusy.login)}
                               onClick={() => handleLogin(source)}
                             >
-                              {rowBusy === "login" ? "Logging in…" : "Log in"}
+                              {rowBusy.login ? "Logging in…" : "Log in"}
                             </button>
                             {source.credential_username ? (
                               <button
                                 className="secondary-button"
                                 type="button"
-                                disabled={rowBusy === "deleting"}
+                                disabled={Boolean(rowBusy.deleting)}
                                 onClick={() => handleDeleteCredentials(source)}
                               >
-                                {rowBusy === "deleting" ? "Removing…" : "Remove credentials"}
+                                {rowBusy.deleting ? "Removing…" : "Remove credentials"}
                               </button>
                             ) : null}
+                          </div>
+                          <div className="portal-config-fields">
+                            <label className="form-field">
+                              Login URL
+                              <input
+                                type="url"
+                                value={configValue(source, "login_url")}
+                                placeholder="Portal login URL"
+                                onChange={(event) =>
+                                  updateConfig(source.id, "login_url", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label className="form-field">
+                              Base URL
+                              <input
+                                type="url"
+                                value={configValue(source, "base_url")}
+                                placeholder="Portal base or list URL"
+                                onChange={(event) =>
+                                  updateConfig(source.id, "base_url", event.target.value)
+                                }
+                              />
+                            </label>
+                            <label className="form-field portal-config-json">
+                              Config JSON
+                              <textarea
+                                rows={10}
+                                value={configValue(source, "config_json")}
+                                placeholder='{"list_url": "https://portal.example.gov/bids"}'
+                                onChange={(event) =>
+                                  updateConfig(source.id, "config_json", event.target.value)
+                                }
+                              />
+                            </label>
+                          </div>
+                          <div className="button-row">
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              disabled={Boolean(rowBusy.config)}
+                              onClick={() => handleSaveConfig(source)}
+                            >
+                              {rowBusy.config ? "Saving..." : "Save portal config"}
+                            </button>
                           </div>
                           {rowMessage[source.id] ? (
                             <p className="muted-text notice-text">{rowMessage[source.id]}</p>

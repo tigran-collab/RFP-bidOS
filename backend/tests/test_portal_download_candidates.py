@@ -8,11 +8,14 @@ Pure logic tests -- no network, no Playwright.
 
 import pytest
 
+from app.services.scrapers import browser_session
 from app.services.scrapers.browser_session import (
     BrowserClosedError,
     _browser_gone,
+    _download_by_browser_request,
     _download_by_selector,
     _filter_download_candidates,
+    _save_click_download,
 )
 from app.services.scrapers.extraction_utils import (
     extract_document_candidates,
@@ -140,3 +143,146 @@ def test_selector_download_raises_browser_closed():
             result=result,
         )
     assert result["errors"] == []
+
+
+class _FakeRequestContext:
+    def __init__(self, response):
+        self._response = response
+
+    def get(self, url, timeout):
+        return self._response
+
+
+class _FakeContext:
+    def __init__(self, response):
+        self.request = _FakeRequestContext(response)
+
+
+class _FakeResponse:
+    def __init__(self, body=b"%PDF-1.4", headers=None):
+        self.status = 200
+        self.headers = headers or {"content-type": "application/pdf"}
+        self.url = "https://example.gov/doc.pdf"
+        self._body = body
+
+    def body(self):
+        return self._body
+
+
+def test_browser_request_download_rejects_declared_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_session, "MAX_DOWNLOAD_BYTES", 8)
+    response = _FakeResponse(headers={"content-type": "application/pdf", "content-length": "9"})
+    result = {"downloaded_files": [], "errors": []}
+
+    outcome = _download_by_browser_request(
+        _FakeContext(response),
+        _candidate("https://example.gov/doc.pdf"),
+        tmp_path,
+        1000,
+        result,
+    )
+
+    assert result["downloaded_files"] == []
+    assert "content-length exceeds" in result["errors"][0]
+    # "skipped" tells the caller not to fall back to the click path, which
+    # would download the entire oversize file through the browser anyway.
+    assert outcome == "skipped"
+
+
+def test_browser_request_download_rejects_body_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_session, "MAX_DOWNLOAD_BYTES", 8)
+    response = _FakeResponse(body=b"123456789")
+    result = {"downloaded_files": [], "errors": []}
+
+    outcome = _download_by_browser_request(
+        _FakeContext(response),
+        _candidate("https://example.gov/doc.pdf"),
+        tmp_path,
+        1000,
+        result,
+    )
+
+    assert result["downloaded_files"] == []
+    assert "response body exceeds" in result["errors"][0]
+    assert outcome == "skipped"
+
+
+def test_browser_request_download_success_returns_downloaded(tmp_path):
+    result = {"downloaded_files": [], "errors": []}
+
+    outcome = _download_by_browser_request(
+        _FakeContext(_FakeResponse()),
+        _candidate("https://example.gov/doc.pdf"),
+        tmp_path,
+        1000,
+        result,
+    )
+
+    assert outcome == "downloaded"
+    assert len(result["downloaded_files"]) == 1
+    assert result["errors"] == []
+
+
+def test_browser_request_download_failure_returns_retry(tmp_path):
+    class FailingRequestContext:
+        def get(self, url, timeout):
+            raise Exception("net::ERR_CONNECTION_REFUSED")
+
+    class FailingContext:
+        request = FailingRequestContext()
+
+    result = {"downloaded_files": [], "errors": []}
+
+    outcome = _download_by_browser_request(
+        FailingContext(),
+        _candidate("https://example.gov/doc.pdf"),
+        tmp_path,
+        1000,
+        result,
+    )
+
+    assert outcome == "retry"
+    assert result["downloaded_files"] == []
+
+
+def test_click_download_rejects_saved_oversize(tmp_path, monkeypatch):
+    monkeypatch.setattr(browser_session, "MAX_DOWNLOAD_BYTES", 8)
+
+    class FakeDownload:
+        suggested_filename = "big.pdf"
+
+        def save_as(self, path):
+            with open(path, "wb") as handle:
+                handle.write(b"123456789")
+
+    class FakeDownloadInfo:
+        value = FakeDownload()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakePage:
+        def expect_download(self, timeout):
+            return FakeDownloadInfo()
+
+    class FakeLocator:
+        def click(self, timeout):
+            return None
+
+    result = {"downloaded_files": [], "errors": []}
+
+    _save_click_download(
+        FakePage(),
+        FakeLocator(),
+        _candidate("https://example.gov/big.pdf"),
+        tmp_path,
+        1000,
+        result,
+    )
+
+    assert result["downloaded_files"] == []
+    assert not (tmp_path / "big.pdf").exists()
+    assert "downloaded file exceeds" in result["errors"][0]

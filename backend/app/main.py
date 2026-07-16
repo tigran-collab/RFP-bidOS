@@ -9,6 +9,7 @@ from app.routers import (
     dashboard,
     documents,
     exports,
+    kb,
     notion,
     opportunities,
     portals,
@@ -71,6 +72,56 @@ app.include_router(portals.router)
 app.include_router(dashboard.router)
 app.include_router(exports.router)
 app.include_router(notion.router)
+app.include_router(kb.router)
+
+
+def _register_kb_exception_handlers() -> None:
+    """Map knowledge-base service exceptions (each carries a ``status_code``) to
+    JSON error responses, so services can raise typed errors and routers stay
+    thin. Registered once at import."""
+    from app.services.kb import (
+        admin as kb_admin,
+        answers as kb_answers,
+        claims as kb_claims,
+        conflicts as kb_conflicts,
+        documents as kb_documents,
+        gallery as kb_gallery,
+        google_drive_connector as kb_gdrive,
+        permissions as kb_permissions,
+        responses as kb_responses,
+        reviews as kb_reviews,
+    )
+
+    kb_exception_types = (
+        kb_permissions.KbAuthError,
+        kb_permissions.KbPermissionError,
+        kb_claims.ClaimNotFoundError,
+        kb_answers.AnswerNotFoundError,
+        kb_documents.KbDocumentError,
+        kb_documents.KbDocumentNotFoundError,
+        kb_conflicts.ConflictNotFoundError,
+        kb_conflicts.ConflictResolutionError,
+        kb_responses.ResponseNotFoundError,
+        kb_reviews.KbReviewError,
+        kb_admin.KbAdminError,
+        kb_admin.KbAdminNotFoundError,
+        kb_gallery.GalleryAssetError,
+        kb_gallery.GalleryAssetNotFoundError,
+        kb_gdrive.DriveConfigError,
+        kb_gdrive.DriveError,
+    )
+
+    def _handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 400),
+            content={"detail": str(exc)},
+        )
+
+    for exc_type in kb_exception_types:
+        app.add_exception_handler(exc_type, _handler)
+
+
+_register_kb_exception_handlers()
 
 
 @app.get("/")

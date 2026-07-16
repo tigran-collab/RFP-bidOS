@@ -103,6 +103,31 @@ def test_federal_security_guard_opportunity_is_not_relevant():
     assert "federal scope excluded" in result["relevance_reason"]
 
 
+def test_various_departments_phrase_is_not_federal_scope():
+    # "variouS DEPARTMENTs" contains the substring "us department" — the
+    # federal filter must match on word boundaries, not substrings.
+    result = score_candidate_relevance(
+        _candidate(
+            "Security Guard Services for Various Departments",
+            agency="City of Fresno",
+            solicitation_number="RFP-26-77",
+        )
+    )
+    assert result["relevance_decision"] == "Relevant"
+    assert "us department" not in result["negative_matches"]
+
+
+def test_state_veterans_affairs_department_is_not_federal_scope():
+    result = score_candidate_relevance(
+        _candidate(
+            "Veterans Home Security Guard Services",
+            agency="California Department of Veterans Affairs",
+        )
+    )
+    assert result["relevance_decision"] == "Relevant"
+    assert "veterans affairs" not in result["negative_matches"]
+
+
 def test_sam_gov_security_opportunity_is_not_relevant():
     result = score_candidate_relevance(
         _candidate(

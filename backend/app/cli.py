@@ -13,6 +13,7 @@ from app.models import Document, Opportunity, ScrapeRun, SourceConfig
 from app.schemas import OpportunityCreate, OpportunityUpdate
 from app.services.ai_evaluator import evaluate_opportunity_with_local_ai
 from app.services.ai_summary import summarize_opportunity
+from app.services.archiver import archive_past_deadline_opportunities
 from app.services.downloader import download_documents_for_opportunity
 from app.services.ollama_client import list_ollama_models
 from app.services.parser import (
@@ -811,6 +812,23 @@ def digest_command(
     typer.echo(render_digest_text(digest))
 
 
+@cli.command("archive-past-deadlines")
+def archive_past_deadlines_command() -> None:
+    """Archive active opportunities whose submission deadline has passed."""
+    with Session(engine) as session:
+        result = archive_past_deadline_opportunities(session)
+
+    typer.echo(
+        f"Archived {result['archived_count']} opportunity(ies) "
+        f"with past submission deadlines."
+    )
+    for item in result["archived"]:
+        typer.echo(
+            f"  [{item['id']}] {item['title']} "
+            f"(due {item['due_date']}, was {item['previous_status']})"
+        )
+
+
 @cli.command("daily-run")
 def daily_run_command(
     days: int = typer.Option(7, "--days", help="Digest window in days"),
@@ -818,7 +836,7 @@ def daily_run_command(
         False, "--skip-scrape", help="Skip scraping enabled sources (offline)"
     ),
 ) -> None:
-    """Scrape enabled sources, score all opportunities, and print a digest."""
+    """Scrape enabled sources, score, archive past deadlines, print a digest."""
     from app.services.daily_run import daily_run
 
     with Session(engine) as session:
@@ -837,6 +855,17 @@ def daily_run_command(
         for err in scrape["errors"]:
             typer.echo(f"  error: {err}")
     typer.echo(f"Scored: {result['scored']} opportunity(ies)")
+    typer.echo(
+        f"Archived past deadlines: {result['archived']['archived_count']} "
+        "opportunity(ies)"
+    )
+    # Name each archived row so a bid leaving the pipeline is never silent —
+    # a stale due_date (e.g. an unsynced deadline extension) archives live bids.
+    for item in result["archived"]["archived"]:
+        typer.echo(
+            f"  [{item['id']}] {item['title']} "
+            f"(due {item['due_date']}, was {item['previous_status']})"
+        )
     typer.echo("")
     typer.echo(render_digest_text(result["digest"]))
 
@@ -929,6 +958,12 @@ def review_queue_command(
         opportunities = [
             o for o in opportunities if (o.review_status or "New") == status
         ]
+    else:
+        # Mirror the HTTP review-queue: Archived bids have their own view and
+        # are kept out of the default working queue unless explicitly requested.
+        opportunities = [
+            o for o in opportunities if (o.review_status or "New") != "Archived"
+        ]
     if priority:
         opportunities = [o for o in opportunities if (o.priority or "") == priority]
 
@@ -983,7 +1018,7 @@ def mark_opportunity_command(
         except ValidationError as exc:
             for error in exc.errors():
                 typer.echo(error["msg"], err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
 
     with Session(engine) as session:
         opportunity = session.get(Opportunity, opportunity_id)
@@ -1368,10 +1403,10 @@ def portal_fetch_debug_command(
         result = browser_session.capture_page(page_url, profile_dir, headless=not headed)
     except browser_session.SessionExpiredError as exc:
         typer.echo(f"No session: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"Fetch failed: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     html = result.get("html") or ""
     out_path.write_text(html, encoding="utf-8")
@@ -1525,7 +1560,7 @@ def add_portal_command(
             )
         except ValueError as exc:
             typer.echo(str(exc), err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
 
     source_id = result["source_id"]
     typer.echo(
@@ -1932,6 +1967,92 @@ def ai_evaluate_all_opportunities_command() -> None:
             typer.echo(f"Reason: {evaluation.reason}")
 
 
+@cli.command("analyze-documents")
+def analyze_documents_command(
+    opportunity_id: int,
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Re-analyze documents that already have an analysis"
+    ),
+) -> None:
+    """Run the local AI document agent over an opportunity's parsed files."""
+    from app.services.document_agent import analyze_opportunity_documents
+
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+
+        result = analyze_opportunity_documents(opportunity_id, session, refresh=refresh)
+
+    if result.get("error"):
+        typer.echo(result["error"], err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"Analyzed {result['documents_analyzed']} document(s), "
+        f"skipped {result['documents_skipped']} already analyzed."
+    )
+    for message in result.get("errors") or []:
+        typer.echo(f"  warning: {message}")
+    if result.get("brief"):
+        typer.echo("")
+        _echo_document_brief(result["brief"])
+
+
+@cli.command("document-brief")
+def document_brief_command(opportunity_id: int) -> None:
+    """Print the stored local-AI document brief for an opportunity."""
+    from app.services.document_agent import get_document_brief
+
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            typer.echo(f"Opportunity not found: {opportunity_id}", err=True)
+            raise typer.Exit(code=1)
+        payload = get_document_brief(opportunity_id, session)
+
+    if payload is None:
+        typer.echo("No document analysis yet. Run analyze-documents first.")
+        return
+
+    typer.echo(f"Title: {opportunity.title}")
+    if payload.get("brief"):
+        _echo_document_brief(payload["brief"])
+    for doc in payload.get("documents") or []:
+        typer.echo("")
+        typer.echo(
+            f"Document {doc['document_id']} ({doc['status']}, "
+            f"{doc['chunk_count']} chunk(s){', truncated' if doc['truncated'] else ''}):"
+        )
+        if doc.get("summary"):
+            typer.echo(f"  {doc['summary']}")
+
+
+def _echo_document_brief(brief: dict) -> None:
+    typer.echo("Document brief (local AI — verify against the source files):")
+    if brief.get("summary"):
+        typer.echo(brief["summary"])
+    if brief.get("red_flags"):
+        typer.echo("Red flags:")
+        for flag in brief["red_flags"]:
+            typer.echo(f"  - {flag}")
+    if brief.get("open_questions"):
+        typer.echo("Open questions:")
+        for question in brief["open_questions"]:
+            typer.echo(f"  - {question}")
+    facts = brief.get("facts") or []
+    if facts:
+        typer.echo(f"Facts ({len(facts)}, with sources):")
+        for fact in facts[:40]:
+            typer.echo(
+                f"  - [{fact.get('category')}] {fact.get('detail')} "
+                f"({fact.get('source_file')} chunk {fact.get('chunk')})"
+            )
+        if len(facts) > 40:
+            typer.echo(f"  … {len(facts) - 40} more (see document-brief API)")
+
+
 @cli.command("ai-summarize-opportunity")
 def ai_summarize_opportunity_command(opportunity_id: int) -> None:
     with Session(engine) as session:
@@ -2210,6 +2331,256 @@ def _echo_notion_status(status: dict) -> None:
     typer.echo(f"Connection: {connection_label}")
     if status.get("message"):
         typer.echo(status["message"])
+
+
+# --- Company Knowledge Base --------------------------------------------------
+
+
+def _kb_actor(session):
+    from app.services.kb.permissions import resolve_acting_user
+
+    return resolve_acting_user(session, None)
+
+
+@cli.command("kb-seed")
+def kb_seed_command() -> None:
+    """Seed default KB users, a company entity, and the reusable-question catalog."""
+    from app.services.kb.seed import seed_kb
+
+    init_db()
+    with Session(engine) as session:
+        result = seed_kb(session)
+    typer.echo(
+        "KB seed complete: "
+        f"{result['users_created']} users, {result['entities_created']} entities, "
+        f"{result['questions_created']} questions, {result['tags_created']} tags"
+    )
+
+
+@cli.command("kb-upload")
+def kb_upload_command(
+    path: str = typer.Argument(..., help="Path to the document to upload"),
+    title: str = typer.Option(None, "--title"),
+    doc_type: str = typer.Option(None, "--doc-type"),
+    category: str = typer.Option(None, "--category"),
+    entity_id: int = typer.Option(None, "--entity-id"),
+    state: str = typer.Option(None, "--state"),
+    industry: str = typer.Option(None, "--industry"),
+    service_type: str = typer.Option(None, "--service-type"),
+    process: bool = typer.Option(True, "--process/--no-process"),
+) -> None:
+    """Upload a document into the vault and (by default) process it."""
+    from app.services.kb import documents as kb_documents
+    from app.services.kb import processing as kb_processing
+
+    file_path = Path(path)
+    if not file_path.exists():
+        typer.echo(f"File not found: {path}")
+        raise typer.Exit(code=1)
+    with Session(engine) as session:
+        actor = _kb_actor(session)
+        document = kb_documents.create_document(
+            session,
+            actor,
+            filename=file_path.name,
+            content=file_path.read_bytes(),
+            metadata={
+                "title": title,
+                "doc_type": doc_type,
+                "category": category,
+                "company_entity_id": entity_id,
+                "applicable_state": state,
+                "applicable_industry": industry,
+                "service_type": service_type,
+            },
+        )
+        document_id = document.id
+        typer.echo(f"Uploaded document {document_id}: {document.filename}")
+        if process:
+            result = kb_processing.process_document(session, document_id)
+            if result.get("error"):
+                typer.echo(f"Processing error: {result['error']}")
+            else:
+                typer.echo(
+                    f"Processed: status={result['status']}, chunks={result['chunks']}, "
+                    f"candidate_claims={result['candidate_claims']}, "
+                    f"conflicts_found={result['conflicts_found']}, "
+                    f"injection_flags={len(result['injection_flags'])}"
+                )
+
+
+@cli.command("kb-gallery-upload")
+def kb_gallery_upload_command(
+    path: str = typer.Argument(..., help="Path to the image to upload"),
+    title: str = typer.Option(None, "--title"),
+    category: str = typer.Option(None, "--category"),
+    entity_id: int = typer.Option(None, "--entity-id"),
+    description: str = typer.Option(None, "--description"),
+    alt_text: str = typer.Option(None, "--alt-text"),
+) -> None:
+    """Upload an image (logo, badge, photo, diagram) into the media gallery."""
+    from app.services.kb import gallery as kb_gallery
+
+    file_path = Path(path)
+    if not file_path.exists():
+        typer.echo(f"File not found: {path}")
+        raise typer.Exit(code=1)
+    with Session(engine) as session:
+        actor = _kb_actor(session)
+        asset = kb_gallery.create_asset(
+            session,
+            actor,
+            filename=file_path.name,
+            content=file_path.read_bytes(),
+            metadata={
+                "title": title,
+                "category": category,
+                "company_entity_id": entity_id,
+                "description": description,
+                "alt_text": alt_text,
+            },
+        )
+        dims = f"{asset.width}x{asset.height}" if asset.width else "n/a"
+        typer.echo(
+            f"Uploaded gallery asset {asset.id}: {asset.filename} "
+            f"({asset.file_type}, {dims}, {asset.size_bytes} bytes)"
+        )
+
+
+@cli.command("kb-gallery-list")
+def kb_gallery_list_command(
+    category: str = typer.Option(None, "--category"),
+    archived: bool = typer.Option(False, "--archived"),
+) -> None:
+    """List media-gallery assets."""
+    from app.services.kb import gallery as kb_gallery
+
+    with Session(engine) as session:
+        assets = kb_gallery.list_assets(session, category=category, archived=archived)
+        for a in assets:
+            typer.echo(
+                f"[{a.id}] {a.category or '-':22} {a.file_type or '-':5} {a.title}"
+            )
+        typer.echo(f"Total: {len(assets)}")
+
+
+@cli.command("kb-process")
+def kb_process_command(document_id: int) -> None:
+    """(Re)process a KB document through the extraction/chunking pipeline."""
+    from app.services.kb import processing as kb_processing
+
+    with Session(engine) as session:
+        result = kb_processing.process_document(session, document_id)
+    if result.get("error"):
+        typer.echo(f"Error: {result['error']}")
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(result, indent=2, default=str))
+
+
+@cli.command("kb-list-claims")
+def kb_list_claims_command(
+    status: str = typer.Option(None, "--status"),
+    category: str = typer.Option(None, "--category"),
+) -> None:
+    """List claims in the registry."""
+    from app.services.kb import claims as kb_claims
+
+    with Session(engine) as session:
+        rows = kb_claims.list_claims(session, status=status, category=category)
+        for c in rows:
+            typer.echo(f"[{c.id}] {c.status:<14} {c.category or '-':<20} {c.title}")
+        typer.echo(f"Total: {len(rows)}")
+
+
+@cli.command("kb-approve-claim")
+def kb_approve_claim_command(
+    claim_id: int, note: str = typer.Option(None, "--note")
+) -> None:
+    """Approve a claim (default admin actor)."""
+    from app.services.kb import claims as kb_claims
+
+    with Session(engine) as session:
+        actor = _kb_actor(session)
+        claim = kb_claims.approve_claim(session, actor, claim_id, note)
+        typer.echo(f"Claim {claim.id} -> {claim.status}")
+
+
+@cli.command("kb-detect-conflicts")
+def kb_detect_conflicts_command(
+    entity_id: int = typer.Option(None, "--entity-id"),
+) -> None:
+    """Run conflict detection across live claims."""
+    from app.services.kb import conflicts as kb_conflicts
+
+    with Session(engine) as session:
+        detected = kb_conflicts.detect_conflicts(session, company_entity_id=entity_id)
+        open_conflicts = kb_conflicts.list_conflicts(session)
+    typer.echo(f"New conflicts: {detected}; open total: {len(open_conflicts)}")
+
+
+@cli.command("kb-expire")
+def kb_expire_command() -> None:
+    """Move past-expiration claims and answers to Expired."""
+    from app.services.kb import answers as kb_answers
+    from app.services.kb import claims as kb_claims
+
+    with Session(engine) as session:
+        claims_expired = kb_claims.expire_due_claims(session)
+        answers_expired = kb_answers.expire_due_answers(session)
+    typer.echo(f"Expired: {claims_expired} claims, {answers_expired} answers")
+
+
+@cli.command("kb-dashboard")
+def kb_dashboard_command() -> None:
+    """Print the Company Knowledge Base dashboard counts."""
+    from app.services.kb.dashboard import get_kb_dashboard
+
+    with Session(engine) as session:
+        data = get_kb_dashboard(session)
+    for key, value in data["counts"].items():
+        typer.echo(f"{key:<24} {value}")
+
+
+@cli.command("kb-generate")
+def kb_generate_command(
+    question: str = typer.Argument(..., help="RFP question to draft a response for"),
+    entity_id: int = typer.Option(None, "--entity-id"),
+    state: str = typer.Option(None, "--state"),
+    service_type: str = typer.Option(None, "--service-type"),
+    tone: str = typer.Option(None, "--tone"),
+    detail_level: str = typer.Option(None, "--detail"),
+    word_count: int = typer.Option(None, "--words"),
+) -> None:
+    """Draft an RFP response from approved company knowledge (local Ollama)."""
+    from app.services.kb import drafting as kb_drafting
+
+    with Session(engine) as session:
+        actor = _kb_actor(session)
+        result = kb_drafting.generate_response(
+            session,
+            actor,
+            {
+                "question": question,
+                "company_entity_id": entity_id,
+                "state": state,
+                "service_type": service_type,
+                "tone": tone,
+                "detail_level": detail_level,
+                "word_count_target": word_count,
+            },
+        )
+    if result.get("error"):
+        typer.echo(f"Error: {result['error']}")
+        raise typer.Exit(code=1)
+    response = result["response"]
+    typer.echo("=== DRAFTED RESPONSE ===")
+    typer.echo(response.get("response_text") or "(empty)")
+    typer.echo(f"\nConfidence: {response.get('confidence_score')}")
+    typer.echo(f"Citations: {len(result.get('citations', []))}")
+    if result.get("warnings"):
+        typer.echo("Warnings:")
+        for w in result["warnings"]:
+            typer.echo(f"  - [{w['severity']}] {w['type']}: {w['message']}")
 
 
 if __name__ == "__main__":

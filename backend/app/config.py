@@ -10,6 +10,9 @@ DATA_ROOT = BACKEND_ROOT / "data"
 DOWNLOAD_ROOT = DATA_ROOT / "downloads"
 PROCESSED_ROOT = DATA_ROOT / "processed"
 BROWSER_PROFILE_ROOT = DATA_ROOT / "browser_profiles"
+# Company Knowledge Base source-document vault (original uploaded files).
+KB_DOCUMENT_ROOT = DATA_ROOT / "kb_documents"
+KB_GALLERY_ROOT = DATA_ROOT / "kb_gallery"
 DEFAULT_DATABASE_PATH = DATA_ROOT / "rfp_bidos.db"
 
 

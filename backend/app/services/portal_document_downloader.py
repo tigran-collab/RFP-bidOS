@@ -15,6 +15,7 @@ from app.config import BROWSER_PROFILE_ROOT, DOWNLOAD_ROOT
 from app.models import Document, Opportunity, SourceConfig
 from app.services import credential_store
 from app.services.downloader import (
+    MAX_DOWNLOAD_BYTES,
     resolve_downloaded_document_path,
     sha256_file,
 )
@@ -26,6 +27,28 @@ from app.services.scrapers.browser_session import (
 from app.services.scrapers.portal_templates import DEFAULT_LOGIN_SUCCESS_SUBSTRINGS
 
 SUPPORTED_PORTAL_SOURCE_TYPES = {"planetbids", "authenticated_browser"}
+
+
+def portal_document_download_available(opportunity: Opportunity, session: Session) -> dict:
+    """Return whether an opportunity has a supported assisted-login portal."""
+    source = _source_for_opportunity(opportunity, session)
+    if source is None:
+        return {"available": False, "reason": "No matching portal source found."}
+    source_type = (source.source_type or "").lower()
+    if source_type not in SUPPORTED_PORTAL_SOURCE_TYPES:
+        return {
+            "available": False,
+            "reason": f"Source '{source.name}' is not an assisted-login portal source.",
+        }
+    # Mirror the guard in download_portal_documents_headed: without a page URL
+    # the download would error immediately, so report it as unavailable (the
+    # pursuit workflow shows "skipped" instead of a spurious step failure).
+    if not (opportunity.source_url or opportunity.portal_url):
+        return {
+            "available": False,
+            "reason": "Opportunity has no source_url or portal_url.",
+        }
+    return {"available": True, "source_id": source.id, "source_name": source.name}
 
 
 def download_portal_documents_headed(opportunity_id: int, session: Session) -> dict:
@@ -246,6 +269,14 @@ def _register_downloaded_file(
     temp_path = Path(item.get("path") or "")
     if not temp_path.is_file():
         summary["errors"].append(f"Downloaded file missing: {temp_path}")
+        return
+    size = temp_path.stat().st_size
+    if size > MAX_DOWNLOAD_BYTES:
+        summary["errors"].append(
+            f"{temp_path.name}: skipped because it exceeds the "
+            f"{MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB download limit"
+        )
+        temp_path.unlink(missing_ok=True)
         return
 
     file_hash = sha256_file(str(temp_path))

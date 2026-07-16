@@ -10,6 +10,10 @@ backend/data/downloads/
 backend/data/processed/
 data/browser_profiles/
 backend/data/browser_profiles/
+data/kb_documents/
+backend/data/kb_documents/
+data/kb_gallery/
+backend/data/kb_gallery/
 frontend/dist/
 frontend/node_modules/
 desktop/node_modules/

@@ -39,6 +39,8 @@ import time
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from app.services.downloader import MAX_DOWNLOAD_BYTES
+
 
 # A persistent Chromium profile can only be opened by one context at a time
 # (Chromium holds a per-profile SingletonLock). Assisted login runs a long-lived
@@ -134,7 +136,18 @@ _SESSION_EXPIRED_MARKERS = (
     "please sign in",
     "session expired",
     "login required",
+    # BidNet serves a stub titled "BidNet Direct - SSO Login" when a session
+    # can't view a page; if it persists after the settle wait, the session is
+    # not usable for that page and pretending otherwise poisons downstream
+    # consumers (e.g. the state filter reading login-page text as bid text).
+    "sso login",
 )
+
+
+def _looks_like_login_stub(html: str) -> bool:
+    """True when the page still reads as a login/denied interstitial."""
+    lowered = (html or "")[:2000].lower()
+    return any(marker in lowered for marker in _SESSION_EXPIRED_MARKERS)
 
 
 class SessionExpiredError(RuntimeError):
@@ -466,6 +479,7 @@ def fetch_authenticated_html_batch(
     timeout_seconds: int = 45,
     headless: bool = True,
     throttle_seconds: float = 0.0,
+    settle_ms: int = 9000,
 ) -> list[dict]:
     """Fetch several pages' HTML within a SINGLE persisted browser context.
 
@@ -507,12 +521,27 @@ def fetch_authenticated_html_batch(
                 try:
                     response = page.goto(url, timeout=timeout_ms)
                     status = response.status if response is not None else None
-                    final_url = page.url
+                    # Let SSO bounces settle before reading the page: BidNet
+                    # serves a tiny "SSO Login" stub that sits network-idle
+                    # for a moment before JS-redirecting to the real page, so
+                    # load states alone are not enough — poll until the stub
+                    # is gone or settle_ms elapses.
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=settle_ms)
+                    except Exception:
+                        pass
+                    settle_deadline = time.monotonic() + settle_ms / 1000
+                    while (
+                        time.monotonic() < settle_deadline
+                        and _looks_like_login_stub(_read_html(page))
+                    ):
+                        page.wait_for_timeout(500)
                     if wait_selector:
                         try:
                             page.wait_for_selector(wait_selector, timeout=timeout_ms)
                         except Exception:
                             pass
+                    final_url = page.url
                     html = _read_html(page)
                     _raise_if_session_expired(status, final_url, html, url)
                     results.append({"url": url, "html": html, "error": None, "session_expired": False})
@@ -697,11 +726,15 @@ def download_document_links_headed(
                         seen_candidate_urls.add(candidate.get("url"))
                         result["downloads_attempted"] += 1
                         before_count = len(result["downloaded_files"])
+                        outcome = "retry"
                         if is_document_url(candidate.get("url", "")):
-                            _download_by_browser_request(
+                            outcome = _download_by_browser_request(
                                 context, candidate, output_path, timeout_ms, result
                             )
-                        if len(result["downloaded_files"]) == before_count:
+                        if (
+                            outcome == "retry"
+                            and len(result["downloaded_files"]) == before_count
+                        ):
                             _download_by_click(page, context, candidate, output_path, timeout_ms, result)
             except BrowserClosedError:
                 result["errors"].append(
@@ -791,24 +824,48 @@ def _download_by_browser_request(
     output_dir: Path,
     timeout_ms: int,
     result: dict,
-) -> None:
+) -> str:
+    """Attempt the direct request download path.
+
+    Returns "downloaded" on success, "skipped" when the size cap rejected the
+    file (callers must NOT retry via click — the click path would pull the
+    whole oversize file through the browser anyway), or "retry" when the click
+    path is still worth trying.
+    """
     url = candidate.get("url")
     if not url:
-        return
+        return "retry"
     try:
         response = context.request.get(url, timeout=timeout_ms)
         status = response.status
-        body = response.body()
         headers = {key.lower(): value for key, value in response.headers.items()}
+        declared_length = headers.get("content-length")
+        if (
+            declared_length
+            and declared_length.isdigit()
+            and int(declared_length) > MAX_DOWNLOAD_BYTES
+        ):
+            result["errors"].append(
+                f"{url}: skipped because content-length exceeds "
+                f"{MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB"
+            )
+            return "skipped"
+        body = response.body()
+        if len(body) > MAX_DOWNLOAD_BYTES:
+            result["errors"].append(
+                f"{url}: skipped because response body exceeds "
+                f"{MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB"
+            )
+            return "skipped"
         content_type = (headers.get("content-type") or "").split(";", 1)[0].lower()
         text_sample = body[:2000].decode("utf-8", errors="ignore")
         _raise_if_session_expired(status, response.url, text_sample, url)
         if status >= 400:
             result["errors"].append(f"{url}: HTTP {status}")
-            return
+            return "retry"
         extension = _extension_for_download(url, content_type)
         if not extension:
-            return
+            return "retry"
         filename = _filename_for_response(url, headers, candidate, extension)
         path = _available_output_path(output_dir / filename)
         path.write_bytes(body)
@@ -822,12 +879,14 @@ def _download_by_browser_request(
                 "method": "browser_request",
             }
         )
+        return "downloaded"
     except SessionExpiredError:
         raise
     except Exception as exc:  # noqa: BLE001 - try the click path next
         if _browser_gone(exc):
             raise BrowserClosedError(str(exc)) from exc
         result["errors"].append(f"{url}: browser request failed: {exc}")
+        return "retry"
 
 
 def _download_by_click(
@@ -909,6 +968,13 @@ def _save_click_download(page, locator, candidate: dict, output_dir: Path, timeo
     filename = download.suggested_filename or _filename_from_url(candidate.get("url")) or "document"
     path = _available_output_path(output_dir / filename)
     download.save_as(str(path))
+    if path.stat().st_size > MAX_DOWNLOAD_BYTES:
+        path.unlink(missing_ok=True)
+        result["errors"].append(
+            f"{filename}: skipped because downloaded file exceeds "
+            f"{MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB"
+        )
+        return
     result["downloaded_files"].append(
         {
             "url": candidate.get("url") or getattr(download, "url", None),

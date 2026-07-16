@@ -133,6 +133,8 @@ def test_refresh_replaces_existing_requirements_on_success(
     remaining = _requirements_for(session, opportunity.id)
     assert len(remaining) == 1
     assert remaining[0].requirement_text == "Contractor must hold a BSIS PPO license."
+    assert remaining[0].document_id is not None
+    assert remaining[0].source_file == "doc.pdf"
 
 
 def test_extract_is_idempotent_across_two_runs(session, tmp_path, monkeypatch):
@@ -165,6 +167,40 @@ def test_extract_is_idempotent_across_two_runs(session, tmp_path, monkeypatch):
     remaining = _requirements_for(session, opportunity.id)
     assert len(remaining) == 1
     assert remaining[0].requirement_text == "Contractor must hold a BSIS PPO license."
+
+
+def test_extract_saves_model_supplied_document_id(session, tmp_path, monkeypatch):
+    opportunity = _seed_opportunity(session, tmp_path)
+    document = session.exec(
+        select(Document).where(Document.opportunity_id == opportunity.id)
+    ).first()
+    extraction = {
+        "summary": "One requirement found.",
+        "requirements": [
+            {
+                "document_id": document.id,
+                "requirement_type": "License",
+                "title": "BSIS License",
+                "requirement_text": "Contractor must hold a BSIS PPO license.",
+                "mandatory": True,
+                "status": "Needs Review",
+            }
+        ],
+        "missing_information": [],
+        "risk_flags": [],
+    }
+    monkeypatch.setattr(
+        requirement_extractor.requests,
+        "post",
+        lambda *args, **kwargs: _FakeOllamaResponse({"response": json.dumps(extraction)}),
+    )
+
+    result = extract_requirements_with_local_ai(opportunity.id, session)
+
+    assert result["requirements_count"] == 1
+    requirement = _requirements_for(session, opportunity.id)[0]
+    assert requirement.document_id == document.id
+    assert requirement.source_file == "doc.pdf"
 
 
 def test_extract_keeps_existing_requirements_when_ollama_is_down(

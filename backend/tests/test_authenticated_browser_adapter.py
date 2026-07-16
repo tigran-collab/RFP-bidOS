@@ -77,13 +77,18 @@ DETAIL_HTML = """
 """
 
 
-def make_source(config, source_id=42):
-    return SimpleNamespace(
+def make_source(config, source_id=42, **overrides):
+    fields = dict(
         id=source_id,
         source_type="authenticated_browser",
         name="Example Portal",
+        portal_type=None,
+        base_url=None,
+        login_url=None,
         config_json=json.dumps(config),
     )
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
 
 
 def _force_playwright(monkeypatch, available=True):
@@ -209,6 +214,124 @@ def test_detail_enrichment_fills_breakdown_fields(monkeypatch):
     assert bid.solicitation_number == "IFB-2026-100"
     assert bid.due_date is not None and bid.due_date.month == 7 and bid.due_date.day == 30
     assert any("enriched 1 candidate" in d for d in adapter.diagnostics)
+
+
+def test_search_keywords_fetch_each_term(monkeypatch):
+    _force_playwright(monkeypatch)
+    calls = []
+
+    def fake_fetch(
+        page_url,
+        profile_dir,
+        wait_selector=None,
+        timeout_seconds=45,
+        headless=True,
+        search_keyword=None,
+        search_input_selector=None,
+        search_submit_selector=None,
+    ):
+        calls.append(
+            {
+                "search_keyword": search_keyword,
+                "search_input_selector": search_input_selector,
+                "search_submit_selector": search_submit_selector,
+            }
+        )
+        slug = (search_keyword or "none").lower()
+        return ROW_HTML.replace(
+            "/bids/RFP-2026-014", f"/bids/{slug}"
+        ).replace(
+            "Unarmed Security Guard Services",
+            f"{search_keyword} Security Guard Services",
+        )
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(DETAIL_HTML),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["search_keywords"] = ["California", "Texas"]
+    config["search_input_selector"] = "#solicitationSingleBoxSearch"
+    config["search_submit_selector"] = "#topSearchButton"
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert [call["search_keyword"] for call in calls] == ["California", "Texas"]
+    assert {result.title for result in results} == {
+        "California Security Guard Services",
+        "Texas Security Guard Services",
+    }
+    assert all(
+        call["search_input_selector"] == "#solicitationSingleBoxSearch"
+        for call in calls
+    )
+    assert all(call["search_submit_selector"] == "#topSearchButton" for call in calls)
+
+
+def test_state_filter_keeps_only_allowed_states_after_detail_enrichment(monkeypatch):
+    _force_playwright(monkeypatch)
+    html = """
+    <html><body>
+    <table class="bids"><tbody>
+      <tr class="bid">
+        <td class="title"><a href="/bids/ca">Security Guard Services</a></td>
+        <td class="number">RFP-CA</td>
+        <td class="due">08/15/2026</td>
+        <td class="agency">BidNet Direct</td>
+      </tr>
+      <tr class="bid">
+        <td class="title"><a href="/bids/nv">Security Guard Services</a></td>
+        <td class="number">RFP-NV</td>
+        <td class="due">08/16/2026</td>
+        <td class="agency">BidNet Direct</td>
+      </tr>
+    </tbody></table>
+    </body></html>
+    """
+
+    def detail_for(url):
+        if url.endswith("/ca"):
+            return """
+            <html><body>
+            <div>Organization: City of San Diego</div>
+            <div>Location: San Diego, CA</div>
+            <div>Pre-bid conference: 07/20/2026 10:00 AM</div>
+            <p>Security guard services for city facilities.</p>
+            </body></html>
+            """
+        return """
+        <html><body>
+        <div>Organization: City of Las Vegas</div>
+        <div>Location: Las Vegas, NV</div>
+        <div>Pre-bid conference: 07/21/2026 10:00 AM</div>
+        <p>Security guard services for city facilities.</p>
+        </body></html>
+        """
+
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: html
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(detail_for),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA", "TX"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert len(results) == 1
+    assert results[0].solicitation_number == "RFP-CA"
+    assert results[0].location == "San Diego, CA"
+    assert any("state filter removed 1 candidate" in d for d in adapter.diagnostics)
 
 
 def test_detail_enrichment_uses_single_batch_call(monkeypatch):
@@ -366,3 +489,385 @@ def test_check_auth_ready_reports_missing_pieces(monkeypatch):
     status = adapter.check_auth_ready(source)
     assert status["ready"] is False
     assert any("browser session" in m for m in status["missing_fields"])
+
+
+STATE_FILTER_LIST_HTML = """
+<html><body>
+<table class="bids"><tbody>
+  <tr class="bid">
+    <td class="title"><a href="/bids/first">Security Guard Services</a></td>
+    <td class="number">RFP-CA</td>
+    <td class="due">08/15/2026</td>
+    <td class="agency">BidNet Direct</td>
+  </tr>
+  <tr class="bid">
+    <td class="title"><a href="/bids/second">Security Guard Services</a></td>
+    <td class="number">RFP-NV</td>
+    <td class="due">08/16/2026</td>
+    <td class="agency">BidNet Direct</td>
+  </tr>
+</tbody></table>
+</body></html>
+"""
+
+
+def _state_filter_detail(url):
+    if url.endswith("/first"):
+        return """
+        <html><body>
+        <div>Organization: City of San Diego</div>
+        <div>Location: San Diego, CA</div>
+        <p>Security guard services for city facilities.</p>
+        </body></html>
+        """
+    return """
+    <html><body>
+    <div>Organization: City of Las Vegas</div>
+    <div>Location: Las Vegas, NV</div>
+    <p>Security guard services for city facilities.</p>
+    </body></html>
+    """
+
+
+def test_state_filter_ignores_state_token_in_list_url(monkeypatch):
+    # The list page URL is shared by every candidate; a state token inside it
+    # (BidNet regional groups look like /california/lapg) must not make the
+    # filter pass everything.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["list_url"] = "https://portal.example.com/california/lapg"
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any("state filter removed 1 candidate" in d for d in adapter.diagnostics)
+
+
+def test_state_filter_clamps_configured_states_to_operating_region(monkeypatch):
+    # The CA/TX ceiling is a HARD rule: a stale/out-of-region value in
+    # state_filter (e.g. "NV") can never re-open that state. The parser still
+    # accepts 2-letter codes; the clamp happens in _resolve_allowed_states.
+    from app.services.scrapers.authenticated_browser import _state_filter
+
+    assert _state_filter({"state_filter": ["NV", "Federal District"]}) == (
+        {"NV"},
+        ["Federal District"],
+    )
+
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["NV", "Federal District"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    # NV is clamped out; the effective filter falls back to the region, so the
+    # CA row is kept and the NV row is dropped.
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any("Federal District" in d for d in adapter.diagnostics)
+    assert any("outside the operating region" in d for d in adapter.diagnostics)
+
+
+def test_state_filter_drops_out_of_region_code_but_keeps_in_region(monkeypatch):
+    # A mixed filter like ["CA","NV"] keeps CA and drops NV (clamped to region).
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA", "NV"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any("outside the operating region" in d for d in adapter.diagnostics)
+
+
+def test_aggregator_detected_via_config_list_url(monkeypatch):
+    # An aggregator whose bidnet URL lives ONLY in config_json.list_url (generic
+    # name/portal_type, null base_url/login_url) must still default to CA/TX.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["list_url"] = "https://www.bidnetdirect.com/private/supplier/bids"
+    config["agency"] = "Regional Purchasing Group"
+    config.pop("state_filter", None)
+
+    source = make_source(
+        config, name="Regional Purchasing Group", portal_type="Other",
+        base_url=None, login_url=None,
+    )
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(source)
+
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any("defaulting to CA/TX" in d for d in adapter.diagnostics)
+
+
+def test_state_filter_drops_unverified_candidates_and_names_them(monkeypatch):
+    # The filter's contract is "only these states": a candidate whose detail
+    # page could not be fetched (here: a per-page fetch error) is unverifiable,
+    # so it is dropped and the diagnostics NAME it so the drop is never silent.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+
+    def fake_batch(urls, profile_dir, wait_selector=None, timeout_seconds=45,
+                   headless=True, throttle_seconds=0.0):
+        out = []
+        for url in urls:
+            if url.endswith("/first"):
+                out.append({
+                    "url": url,
+                    "html": "<html><body><div>Location: San Diego, CA</div></body></html>",
+                    "error": None,
+                    "session_expired": False,
+                })
+            else:
+                # The NV candidate's detail page fails to fetch -> unverifiable.
+                out.append({"url": url, "html": "", "error": "fetch error", "session_expired": False})
+        return out
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html_batch", fake_batch)
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any(
+        "could not be checked" in d and "Security Guard Services" in d
+        for d in adapter.diagnostics
+    )
+
+
+def test_state_filter_enriches_all_candidates_despite_detail_limit(monkeypatch):
+    # Regression: a detail_limit must NOT cap enrichment while a state filter is
+    # active, or in-region bids whose list row carries no state token would be
+    # dropped as unverified. Both rows must be enriched; the CA row survives.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    batch_urls = []
+
+    def fake_batch(urls, profile_dir, wait_selector=None, timeout_seconds=45,
+                   headless=True, throttle_seconds=0.0):
+        batch_urls.extend(urls)
+        return [
+            {
+                "url": url,
+                "html": (
+                    "<html><body><div>Location: San Diego, CA</div></body></html>"
+                    if url.endswith("/first")
+                    else "<html><body><div>Location: Las Vegas, NV</div></body></html>"
+                ),
+                "error": None,
+                "session_expired": False,
+            }
+            for url in urls
+        ]
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html_batch", fake_batch)
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA"]
+    config["detail_limit"] = 1  # must be ignored while the state filter is active
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert len(batch_urls) == 2  # BOTH enriched despite detail_limit=1
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+
+
+def test_state_filter_enriches_every_candidate_by_default(monkeypatch):
+    # With a state filter configured and no explicit detail_limit, the default
+    # 10-page enrichment cap must not apply — every candidate needs its detail
+    # page checked or it would be dropped as unverifiable.
+    _force_playwright(monkeypatch)
+    many_rows = "".join(
+        f"""
+        <tr class="bid">
+          <td class="title"><a href="/bids/item-{index}">Security Guard Services {index}</a></td>
+          <td class="number">RFP-{index}</td>
+          <td class="due">08/15/2026</td>
+          <td class="agency">BidNet Direct</td>
+        </tr>
+        """
+        for index in range(12)
+    )
+    html = f'<html><body><table class="bids"><tbody>{many_rows}</tbody></table></body></html>'
+    batch_urls = []
+
+    def fake_batch(urls, profile_dir, wait_selector=None, timeout_seconds=45,
+                   headless=True, throttle_seconds=0.0):
+        batch_urls.extend(urls)
+        return [
+            {
+                "url": url,
+                "html": "<html><body><div>Location: San Diego, CA</div></body></html>",
+                "error": None,
+                "session_expired": False,
+            }
+            for url in urls
+        ]
+
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html", lambda *a, **k: html
+    )
+    monkeypatch.setattr(
+        authenticated_browser, "fetch_authenticated_html_batch", fake_batch
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config["state_filter"] = ["CA"]
+
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(make_source(config))
+
+    assert len(batch_urls) == 12
+    assert len(results) == 12
+
+
+def test_bidnet_defaults_to_ca_tx_when_no_state_filter_configured(monkeypatch):
+    # The user's core requirement: a BidNet source that forgot to configure a
+    # state_filter must STILL drop out-of-state bids. A multi-state aggregator
+    # defaults to the CA/TX operating region.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "BidNet Direct"
+    config.pop("state_filter", None)  # explicitly NOT configured
+
+    source = make_source(
+        config, portal_type="BidNet", base_url="https://www.bidnetdirect.com/"
+    )
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(source)
+
+    assert [r.solicitation_number for r in results] == ["RFP-CA"]
+    assert any("defaulting to CA/TX" in d for d in adapter.diagnostics)
+    assert any("state filter removed 1 candidate" in d for d in adapter.diagnostics)
+
+
+def test_non_aggregator_without_state_filter_is_unfiltered(monkeypatch):
+    # A single-agency portal (not a multi-state aggregator) with no state_filter
+    # is left unfiltered — its bids are inherently in its own state, and a
+    # positive CA/TX filter would wrongly drop in-state rows lacking state text.
+    _force_playwright(monkeypatch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html",
+        lambda *a, **k: STATE_FILTER_LIST_HTML,
+    )
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(_state_filter_detail),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["agency"] = "City Portal"
+    config.pop("state_filter", None)
+
+    source = make_source(
+        config, portal_type="Bonfire", name="City of Carson Bonfire"
+    )
+    adapter = AuthenticatedBrowserAdapter()
+    results = adapter.scrape(source)
+
+    assert {r.solicitation_number for r in results} == {"RFP-CA", "RFP-NV"}
+    assert not any("defaulting to CA/TX" in d for d in adapter.diagnostics)
+
+
+def test_search_keywords_accepts_comma_separated_string(monkeypatch):
+    _force_playwright(monkeypatch)
+    keywords_seen = []
+
+    def fake_fetch(page_url, profile_dir, wait_selector=None, timeout_seconds=45,
+                   headless=True, search_keyword=None, search_input_selector=None,
+                   search_submit_selector=None):
+        keywords_seen.append(search_keyword)
+        return ROW_HTML
+
+    monkeypatch.setattr(authenticated_browser, "fetch_authenticated_html", fake_fetch)
+    monkeypatch.setattr(
+        authenticated_browser,
+        "fetch_authenticated_html_batch",
+        _batch_returning(DETAIL_HTML),
+    )
+
+    config = dict(ROW_CONFIG)
+    config["search_keywords"] = "California, Texas"
+
+    adapter = AuthenticatedBrowserAdapter()
+    adapter.scrape(make_source(config))
+
+    assert keywords_seen == ["California", "Texas"]

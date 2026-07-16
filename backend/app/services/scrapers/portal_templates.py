@@ -70,6 +70,10 @@ PORTAL_TEMPLATES: dict[str, dict] = {
             "wait_selector": _TODO_SELECTOR,
             "success_url_substring": "/private/",
             "agency": "BidNet Direct",
+            "search_keywords": ["California", "Texas"],
+            "search_input_selector": "#solicitationSingleBoxSearch",
+            "search_submit_selector": "#topSearchButton",
+            "state_filter": ["CA", "TX"],
             "row_selector": _TODO_SELECTOR,
             "field_map": {
                 "title": _TODO_SELECTOR,
@@ -81,8 +85,9 @@ PORTAL_TEMPLATES: dict[str, dict] = {
         },
         "notes": (
             "BidNet Direct login is at https://www.bidnetdirect.com/. The exact "
-            "list_url and row/field selectors are NOT hardcoded here because "
-            "they must be captured from a real logged-in session. Run "
+            "list_url and row/field selectors must be captured from a real "
+            "logged-in session. The template searches California and Texas only "
+            "and filters results to CA/TX evidence. Run "
             "add-portal -> set-credentials -> portal-login, then open the saved "
             "bids-list page and finalize list_url, row_selector, and field_map "
             "from the real DOM. If you leave row_selector/field_map as "

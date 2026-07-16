@@ -225,6 +225,38 @@ If Ollama is off or the configured model is not installed, CLI/API/frontend surf
 When Ollama is running but `qwen3:8b` is missing, `ai-status` also prints:
 `Configured model is not installed. Run: ollama pull qwen3:8b`
 
+### Document Agent
+
+The local AI **document agent** works through an opportunity's downloaded and
+parsed files end-to-end — unlike the AI evaluation and requirement extraction,
+which read one bounded snippet. It splits every parsed document into
+overlapping chunks, extracts structured facts per chunk (deadlines, submission
+logistics, staffing/scope, wages, insurance/bonding, licensing, evaluation
+criteria, contract value), then synthesizes an opportunity-level brief with
+red flags and open questions. Every fact is cited back to its source file and
+chunk so a human can verify it.
+
+```cmd
+cd backend
+python -m app.cli analyze-documents 1            # analyze files not yet analyzed
+python -m app.cli analyze-documents 1 --refresh  # re-analyze everything
+python -m app.cli document-brief 1               # print the stored brief
+```
+
+API: `POST /opportunities/{id}/analyze-documents` (optional `?refresh=true`)
+and `GET /opportunities/{id}/document-brief`. The frontend detail page has an
+**Analyze Documents** button and a **Local AI Document Brief** panel.
+
+Notes:
+
+- Local Ollama only; no cloud AI, no proposal drafting. Output is a review aid.
+- Documents already analyzed are skipped unless `--refresh` is passed; a failed
+  refresh never deletes the previous analysis.
+- Very large files are capped at 40 chunks (~240k characters) and flagged
+  `truncated` so the gap is visible.
+- Chunks the model answers with unusable JSON are reported and the analysis is
+  marked `partial`, never silently complete.
+
 ### AI Summary
 
 The app can generate a concise plain-language summary of an opportunity (and its
@@ -356,14 +388,13 @@ python -m app.cli discover-socrata-sources --seed
 - Auto-discovered field maps are **best-guess only** and must be verified by a human before enabling and scraping. The seeded source's notes call this out.
 - The catalog query and per-dataset probe are the only network calls, both via the public Socrata API (no key).
 
-## Future Authenticated Sources / BidNet Placeholder
+## Authenticated Source Capability
 
 - Public scraping is supported for generic public procurement pages.
 - Credential-aware source configuration exists: sources may be marked as requiring credentials, with credential type, username, and secret reference fields.
-- BidNet can be marked as requiring credentials for future authenticated access via the portal type and credential fields.
-- Authenticated scraping is intentionally disabled in this phase. The `BidNetPlaceholderAdapter` returns a controlled "not enabled" message and never performs login, credential submission, or scraping behind a login wall.
+- BidNet Direct is supported through the assisted-login `authenticated_browser` path when configured as that source type. The legacy demo placeholder remains disabled and non-scraping.
 - Passwords must not be committed or stored raw in the database.
-- Future authenticated access should use:
+- Authenticated access should use:
   - A secure secret store (not plaintext environment variables in production).
   - Review of the portal's terms of service.
   - Rate-limit awareness and human-controlled execution.
@@ -501,6 +532,10 @@ The `authenticated_browser` config lives in `config_json`:
   "list_url": "https://portal.example.com/bids",
   "wait_selector": "table.bids",
   "agency": "Example Agency",
+  "search_keywords": ["California", "Texas"],
+  "search_input_selector": "#solicitationSingleBoxSearch",
+  "search_submit_selector": "#topSearchButton",
+  "state_filter": ["CA", "TX"],
   "row_selector": "table.bids tbody tr",
   "field_map": {
     "title": "td.title a",
@@ -512,12 +547,19 @@ The `authenticated_browser` config lives in `config_json`:
 }
 ```
 
-Only `list_url` is required. If you omit `row_selector`/`field_map`, the adapter
+For BidNet Direct, the template defaults to `search_keywords = ["California",
+"Texas"]` and `state_filter = ["CA", "TX"]`, so the connector searches and
+keeps California/Texas opportunities only. When a `state_filter` is set, every
+candidate's detail page is fetched (the default 10-page enrichment cap does not
+apply unless `detail_limit` is set explicitly), and candidates whose state
+cannot be verified are dropped and named in the scrape diagnostics — the filter
+never passes unverified bids through. Only `list_url` is required. If you
+omit `row_selector`/`field_map`, the adapter
 falls back to the **generic table parser** on the fetched HTML. For a new
 generic portal the row/field selectors typically need to be **finalized from a
 real logged-in session** — the templates seed placeholders (`TODO_...`), so open
 the saved bids-list page after `portal-login` and fill in the real CSS
-selectors. (This is why BidNet's selectors are placeholders, not guesses.)
+selectors. (This is why BidNet's row selectors are placeholders, not guesses.)
 
 Enable the source, then scrape it like any other:
 
@@ -640,7 +682,14 @@ The CLI creates the `exports/` directory if missing and prints the event count. 
 
 ## Daily Run
 
-`daily-run` chains the daily intake into one command: it scrapes all enabled sources (reusing the same per-source scraper as `scrape-enabled-sources`, continuing on per-source errors), re-scores all opportunities, and prints a notification digest. It is CLI-only by design - a synchronous network scrape over HTTP is undesirable.
+`archive-past-deadlines` archives active opportunities whose submission due date is before today. It leaves opportunities due today active and does not change already Archived or Do Not Pursue rows.
+
+```cmd
+cd backend
+python -m app.cli archive-past-deadlines
+```
+
+`daily-run` chains the daily intake into one command: it scrapes all enabled sources (reusing the same per-source scraper as `scrape-enabled-sources`, continuing on per-source errors), re-scores all opportunities, archives past-deadline opportunities, and prints a notification digest. It is CLI-only by design - a synchronous network scrape over HTTP is undesirable.
 
 ```cmd
 cd backend
@@ -649,7 +698,7 @@ python -m app.cli daily-run --days 14
 python -m app.cli daily-run --skip-scrape
 ```
 
-Use `--skip-scrape` to re-score and refresh the digest without touching the network. There is no HTTP endpoint for `daily-run`.
+Use `--skip-scrape` to re-score, archive past-deadline opportunities, and refresh the digest without touching the network. There is no HTTP endpoint for `daily-run`.
 
 ## Review Queue
 
@@ -739,8 +788,180 @@ python -m app.cli notion-sync --status Pursue --limit 200
 
 Endpoints: `GET /notion/status` (never returns the token), `PUT /notion/config` (`{"token": ..., "database_id": ...}`), `DELETE /notion/config`, and `POST /notion/sync` (optional `{"status": ..., "limit": ..., "opportunity_ids": [...]}`). Sync defaults to all non-`Archived` opportunities, bounded by `limit`. The **Settings** page has Save, Test connection, Sync, and Remove-configuration controls.
 
+## Company Knowledge Base & AI Response Drafting
+
+A governed company knowledge system for producing accurate RFP/proposal
+responses from **verified company sources only**. It is *not* a chatbot over a
+folder of files: uploaded documents are untrusted data, and information
+extracted from them never becomes trusted reusable knowledge without human
+review. Only **Approved, non-expired** claims and answers are used automatically
+in generated responses.
+
+Everything is **local**: text extraction, retrieval, and drafting run on the
+machine; AI drafting uses the same local Ollama (`qwen3:8b`) as the rest of the
+app. No cloud AI, no OpenAI.
+
+### Modules (web UI: **Knowledge Base** tab)
+
+- **Knowledge Dashboard** — totals (documents, approved claims, pending review,
+  expired, expiring soon, conflicts, approved answers, failed processing),
+  coverage by category, recent responses, and expiring items.
+- **Source Document Vault** — drag-and-drop multi-file upload (PDF, DOCX, XLSX,
+  CSV, TXT, images where OCR is available), processing status, metadata,
+  tags, effective/expiration dates, archival.
+- **Media Gallery** — reusable visual assets (logos, certification badges, team
+  and facility photos, diagrams). Drag-and-drop image upload (PNG, JPG, GIF,
+  WEBP, SVG, BMP) with validation (extension + size + image magic bytes),
+  category/entity/tags/alt-text metadata, a thumbnail grid, a detail modal
+  (preview, edit, open/download, archive, delete), and safe by-id file serving.
+  Optional Pillow captures image dimensions; without it assets still upload and
+  display.
+- **Claims Registry** — individually governed company facts with canonical /
+  short / long wording, category, entity, geographic/service/industry scope,
+  source evidence, approval status, expiration, confidence, restrictions,
+  supersede relationships, and full version history.
+- **Reusable Answer Library** — approved answers for common RFP questions with
+  variants, supporting claims/documents, usage tracking, and versioning.
+- **AI Response Workspace** — paste a question, choose entity/state/industry/
+  service/tone/detail/word-count and an **AI provider** (local Ollama by default,
+  or Claude API), generate a cited draft, then shorten / expand / make formal /
+  to-bullets / to-narrative / regenerate, copy, or save to a project.
+- **Response Review** — generated responses with citations, warnings, and a
+  review-status workflow.
+- **Conflict Queue** — detected contradictions (employee counts, license
+  numbers, insurance limits, years in business, addresses) with resolve /
+  supersede / restrict / merge / dismiss.
+- **Expiration Queue** — expired and expiring-soon claims and documents.
+- **Admin Settings** — users & roles, company entities, and the audit log.
+
+### AI drafting providers (local Ollama or Claude API)
+
+The Response Workspace drafts with the **local Ollama model by default** (offline,
+no key). You can optionally configure **Anthropic's Claude API** (`claude-opus-4-8`
+by default) as a cloud provider for higher-quality drafts, selectable per request
+from the workspace's **AI Provider** dropdown. The API key is a secret and lives
+**only in the OS keychain** (via the same credential store as Notion/portals) —
+never in the database, git, logs, or any API response. AI generation is rate-limited
+across both providers to prevent runaway loops. Configure it under **Knowledge Base
+→ Admin → AI Drafting Provider** (admins only). Note: when the Claude provider is
+used, the retrieved (approved) company context is sent to the cloud.
+
+- Endpoints: `GET /kb/ai-config`, `PUT /kb/ai-config/claude` (`{api_key, model}`,
+  admin), `DELETE /kb/ai-config/claude`. `POST /kb/responses/generate` and
+  `.../transform` accept a `provider` field (`local` | `claude`).
+- New optional dependency: `anthropic` (in `requirements.txt`; imported lazily, so
+  the app and full test suite run without it — only needed when Claude is used).
+
+### Google Drive import
+
+Import company documents from Google Drive straight into the Source Document
+Vault, where they run through the same extraction → candidate-claim review
+pipeline as uploads. This app cannot perform Google's interactive OAuth consent
+itself, so — mirroring the assisted-login / Notion pattern — you supply an OAuth
+**access token** (and, for auto-refresh, a **refresh token + client id/secret**)
+under **Admin → Google Drive Import**; credentials are stored **only in the OS
+keychain**, and the (non-secret) folder id in `AppSetting`. The Document Vault
+then shows a **Browse Drive** panel to pick and import files. Google-native docs
+are exported (Docs→DOCX, Sheets→XLSX, Slides→PDF); unsupported types are skipped;
+downloads pass through the vault's extension/size/MIME validation.
+
+- Endpoints: `GET /kb/google-drive/status`, `PUT /kb/google-drive/config` (admin),
+  `DELETE /kb/google-drive/config`, `GET /kb/google-drive/files`,
+  `POST /kb/google-drive/import` (`{file_ids, company_entity_id}`).
+
+### Roles & permissions
+
+There is no login (the app is local-first). The acting user is selected in the
+**Acting as** switcher and sent to the backend as the `X-KB-User-Id` header;
+**permissions are enforced server-side** from that user's role. Roles:
+`administrator`, `knowledge_manager`, `proposal_writer`, `reviewer`,
+`read_only`. Permissions cover uploading, editing metadata, creating/approving/
+rejecting claims, drafting, viewing restricted content, managing users,
+exporting, archiving, and resolving conflicts. When no header is sent the
+seeded administrator is used, so single-user installs work out of the box.
+
+### Drafting pipeline & guardrails
+
+Normalize question → classify category → apply entity/state/industry/service
+filters → retrieve approved claims + approved reusable answers + supporting
+source chunks → build a controlled, injection-hardened context (never the whole
+database) → generate → validate factual statements against retrieved material →
+attach citations → produce warnings → persist prompt, retrieved context, output,
+model, and audit metadata. The model is instructed never to invent client
+names, values, licenses, locations, insurance limits, headcounts, references,
+certifications, or performance results; uploaded document text is wrapped as
+DATA and injection markers are neutralized so document content can never
+override system rules. Warnings surface missing information, contradictions,
+expiration, restricted sources, entity mismatch, state/license mismatch, and
+unsupported factual tokens.
+
+### Setup & CLI
+
+No new environment variables are required — the KB reuses `OLLAMA_BASE_URL` /
+`OLLAMA_MODEL`. New Python dependencies (`python-docx`, `openpyxl`,
+`python-multipart`) are in `requirements.txt`; reinstall after pulling:
+
+```cmd
+cd backend
+python -m pip install -r requirements.txt
+python -m app.cli init-db      REM creates the kb_* tables (idempotent)
+python -m app.cli kb-seed      REM default users, a company entity, question catalog
+```
+
+Uploaded originals are stored under `backend/data/kb_documents/` (gitignored)
+alongside their extracted text (chunks). Image OCR is an optional integration
+point: install `pytesseract` + `Pillow` and the `tesseract` binary to enable it;
+without them, images upload but extract no text (flagged, never a hard failure).
+
+CLI:
+
+```cmd
+cd backend
+python -m app.cli kb-upload path\to\capabilities.pdf --entity-id 1 --doc-type "Capabilities Statement"
+python -m app.cli kb-process <document_id>
+python -m app.cli kb-list-claims --status "Pending Review"
+python -m app.cli kb-approve-claim <claim_id> --note "verified"
+python -m app.cli kb-detect-conflicts
+python -m app.cli kb-expire
+python -m app.cli kb-gallery-upload path\to\logo.png --title "Company Logo" --category "Logo" --entity-id 1
+python -m app.cli kb-gallery-list
+python -m app.cli kb-dashboard
+python -m app.cli kb-generate "Describe your company." --entity-id 1 --state CA
+```
+
+API (all under `/kb`, docs at `/docs`): `GET /kb/dashboard`, `GET/POST /kb/documents`,
+`POST /kb/documents/{id}/process`, `GET/POST/PATCH /kb/claims...`,
+`POST /kb/claims/{id}/approve|reject|restrict|supersede`, `GET/POST /kb/answers...`,
+`POST /kb/responses/generate`, `POST /kb/responses/{id}/transform`,
+`POST /kb/responses/{id}/save-to-project`, `GET/POST /kb/conflicts...`,
+`GET /kb/search`, `GET /kb/audit`, and more.
+
+### Architecture notes & tradeoffs
+
+The app runs on **SQLite** (no PostgreSQL/pgvector), so the following are the
+closest technically sound implementations, documented deliberately:
+
+- **Hybrid search without pgvector** — retrieval is a deterministic, offline
+  lexical hybrid: BM25 term scoring + exact-phrase boosting + metadata
+  filtering (`services/kb/retrieval.py`). Embedding columns exist on chunks for
+  an optional future Ollama-embedding reranker; the default path needs no model.
+- **RBAC without login** — a full role/permission matrix and audit trail are
+  implemented and enforced server-side via the `X-KB-User-Id` header rather than
+  a session/auth system.
+- **Async processing without a task queue** — uploads return immediately and
+  processing runs on a background thread (`enqueue_processing`); a synchronous,
+  deterministic `process_document` powers the CLI and tests.
+- **Migrations** — new `kb_*` tables are created by SQLModel `create_all` on
+  boot/`init-db` (the repo has no Alembic; the existing `_ensure_columns`
+  pattern handles column additions to pre-existing tables).
+- **Project integration** — generated responses link to existing `Opportunity`
+  rows (`opportunity_id`) rather than duplicating a projects model.
+
 ## Scope Notes
 
-This project currently avoids proposal drafting, OCR, login scraping, recursive crawling, cloud AI, OpenAI APIs, and automated submission.
+Proposal-response **drafting** is now supported through the Company Knowledge
+Base (local Ollama only, from **approved** company knowledge, with citations and
+human review at every gate). The project still avoids cloud AI, OpenAI APIs,
+login scraping, recursive crawling, and automated bid submission.
 
 Scraping approach is **API-first hybrid** (see "Scraper policy and limitations" above): documented/open APIs and portals' own JSON endpoints are preferred; headless-browser rendering (Playwright) is permitted **only as a selective, flagged fallback** for JS-rendered portals that expose no reachable API — with robots.txt/ToS/rate-limit respect and no evasion of access controls. This amends the earlier blanket "no browser automation" note to reflect that most JS portals can be reached via their underlying JSON API without a browser, and that the browser fallback is a deliberate, bounded option for the remainder.

@@ -6,13 +6,14 @@ import OpportunityTable from "../components/OpportunityTable.jsx";
 
 const errorMessage = "Failed to load backend data. Is the backend running?";
 
+// Archived opportunities are shown only on the dedicated "Archived" tab, so
+// they are excluded from this list and its status filter.
 const REVIEW_STATUSES = [
   "New",
   "Needs Review",
   "Pursue",
   "Do Not Pursue",
   "Watchlist",
-  "Archived",
 ];
 
 const SORTS = [
@@ -64,9 +65,16 @@ export default function Opportunities({ onOpenOpportunity }) {
     loadOpportunities();
   }, [loadOpportunities]);
 
+  // Archived rows never appear here regardless of filters — they have their
+  // own tab. This is the base set the search/status/sort operate on.
+  const nonArchived = useMemo(
+    () => opportunities.filter((o) => (o.review_status || "New") !== "Archived"),
+    [opportunities],
+  );
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    let rows = opportunities;
+    let rows = nonArchived;
     if (term) {
       rows = rows.filter((o) =>
         [o.title, o.agency, o.solicitation_number]
@@ -88,7 +96,7 @@ export default function Opportunities({ onOpenOpportunity }) {
       sorted.sort((a, b) => addedTime(b) - addedTime(a));
     }
     return sorted;
-  }, [opportunities, search, statusFilter, sort]);
+  }, [nonArchived, search, statusFilter, sort]);
 
   // Reset to the first page whenever the result set changes.
   useEffect(() => {
@@ -149,9 +157,9 @@ export default function Opportunities({ onOpenOpportunity }) {
       </div>
 
       <p className="muted-text">
-        {total === opportunities.length
+        {total === nonArchived.length
           ? `${total} opportunit${total === 1 ? "y" : "ies"}`
-          : `Showing ${total} of ${opportunities.length} opportunities`}
+          : `Showing ${total} of ${nonArchived.length} opportunities`}
         {pageCount > 1
           ? ` — page ${currentPage} of ${pageCount}`
           : ""}

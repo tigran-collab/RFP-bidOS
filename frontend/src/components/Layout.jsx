@@ -3,10 +3,20 @@ const navItems = [
   { key: "opportunities", label: "Opportunities" },
   { key: "newOpportunity", label: "New Opportunity" },
   { key: "reviewQueue", label: "Review Queue" },
+  { key: "archived", label: "Archived" },
   { key: "scraper", label: "Scraper" },
   { key: "portals", label: "Portals" },
+  { key: "kbDashboard", label: "Knowledge Base" },
   { key: "settings", label: "Settings" },
 ];
+
+// Any kb* route highlights the Knowledge Base nav entry.
+function isActive(itemKey, currentPage) {
+  if (itemKey === "kbDashboard") {
+    return currentPage.startsWith("kb");
+  }
+  return currentPage === itemKey;
+}
 
 export default function Layout({ children, currentPage, onNavigate }) {
   return (
@@ -18,7 +28,7 @@ export default function Layout({ children, currentPage, onNavigate }) {
             key={item.key}
             type="button"
             onClick={() => onNavigate(item.key)}
-            aria-current={currentPage === item.key ? "page" : undefined}
+            aria-current={isActive(item.key, currentPage) ? "page" : undefined}
           >
             {item.label}
           </button>

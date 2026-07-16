@@ -183,3 +183,28 @@ class OpportunityEvaluation(SQLModel, table=True):
     recommended_next_action: str | None = None
     raw_response: str | None = None
     created_at: datetime = Field(default_factory=utcnow_naive)
+
+
+class DocumentAnalysis(SQLModel, table=True):
+    """Local-AI document agent output.
+
+    ``kind="document"`` rows hold one parsed file's full-pass analysis
+    (document_id set); the ``kind="brief"`` row (document_id NULL) is the
+    opportunity-level synthesis across all analyzed files.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    opportunity_id: int = Field(foreign_key="opportunity.id", index=True)
+    document_id: int | None = Field(default=None, foreign_key="document.id", index=True)
+    kind: str = "document"  # "document" | "brief"
+    model_name: str | None = None
+    status: str = "completed"  # "completed" | "partial"
+    summary: str | None = None
+    facts_json: str | None = None  # [{category, detail, source_file, chunk}]
+    red_flags_json: str | None = None  # [str]
+    open_questions_json: str | None = None  # [str]
+    chunk_count: int | None = None
+    analyzed_chars: int | None = None
+    truncated: bool = False
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow_naive)

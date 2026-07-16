@@ -216,11 +216,8 @@ def test_missing_required_config_raises(monkeypatch):
     adapter = SocrataAdapter()
     bad = SimpleNamespace(source_type="socrata", name="x", config_json=json.dumps({"domain": "d"}))
     monkeypatch.setattr(adapter, "_fetch_rows", lambda *a, **k: [])
-    try:
+    with pytest.raises(ValueError):
         adapter.scrape(bad)
-        assert False, "expected ValueError for missing dataset_id/title"
-    except ValueError:
-        pass
 
 
 # --- _parse_date: naive-UTC normalization and plausibility ------------------

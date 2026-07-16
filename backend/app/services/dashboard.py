@@ -22,6 +22,7 @@ from app.services.scrapers.capabilities import get_source_scraper_capabilities
 UPCOMING_WINDOW_DAYS = 30
 NEEDS_ACTION_DUE_DAYS = 14
 ACTIVE_STATUSES = {"Pursue", "Watchlist", "Needs Review"}
+TERMINAL_STATUSES = {"Archived", "Do Not Pursue"}
 
 # Lower number sorts first in the top-opportunities ranking.
 TOP_STATUS_RANK = {
@@ -92,10 +93,25 @@ def get_operations_dashboard(session) -> dict:
         "sources_requiring_credentials": sum(
             1 for s in sources if s.requires_credentials
         ),
-        "deadline_risk_high": sum(1 for o in opportunities if o.deadline_risk == "High"),
-        "deadline_past_due": sum(1 for o in opportunities if o.deadline_risk == "Past Due"),
+        # Deadline-risk counts cover non-terminal rows only: the auto-archiver
+        # stamps "Past Due" on every row it archives, so counting terminal rows
+        # would turn these into ever-growing cumulative tallies instead of a
+        # picture of what currently needs attention.
+        "deadline_risk_high": sum(
+            1
+            for o in opportunities
+            if o.deadline_risk == "High" and status_of(o) not in TERMINAL_STATUSES
+        ),
+        "deadline_past_due": sum(
+            1
+            for o in opportunities
+            if o.deadline_risk == "Past Due" and status_of(o) not in TERMINAL_STATUSES
+        ),
         "deadline_missing": sum(
-            1 for o in opportunities if o.deadline_risk == "Missing Deadline"
+            1
+            for o in opportunities
+            if o.deadline_risk == "Missing Deadline"
+            and status_of(o) not in TERMINAL_STATUSES
         ),
         "logistics_qa_needs_review": sum(
             1 for qa in latest_qa.values() if qa.qa_status == "Needs Review"
@@ -145,6 +161,8 @@ def _opp_brief(opp: Opportunity) -> dict:
 def _upcoming_deadlines(opportunities: list[Opportunity], now: datetime) -> list[dict]:
     items = []
     for opp in opportunities:
+        if (opp.review_status or "New") in TERMINAL_STATUSES:
+            continue
         if not opp.due_date:
             continue
         days = _days_until(opp.due_date, now)

@@ -8,6 +8,7 @@ from app.services.scrapers.keywords import (
     NEGATIVE_KEYWORDS,
     PRIMARY_SECURITY_KEYWORDS,
     SECONDARY_SECURITY_KEYWORDS,
+    matches_federal_scope,
 )
 
 SECURITY_TERMS = (
@@ -79,6 +80,12 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         text, (*PRIMARY_SECURITY_KEYWORDS, *SECONDARY_SECURITY_KEYWORDS)
     )
     non_security_match = _has_any(text, NON_SECURITY_TERMS)
+    federal_scope_match = bool(matches_federal_scope(text))
+    # The terminal auto-exclusion flag keys off the fields that identify the
+    # ISSUER. A federal mention in the description or an operator note (e.g.
+    # "confirmed this is NOT a federal agency") still penalizes the score,
+    # but must never flip a row to Do Not Pursue unattended.
+    federal_identity_match = bool(matches_federal_scope(_identity_text(opportunity)))
     security_match = (
         _has_any(text, SECURITY_TERMS)
         or targeted_security_match
@@ -98,6 +105,12 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
     if targeted_security_match:
         score += 20
         positive_factors.append("Target security keyword match")
+
+    if federal_scope_match:
+        score -= 200
+        disqualified = True
+        negative_factors.append("Federal opportunity outside state/local scope")
+        verification_needed.append("Exclude federal bids from pursuit surfaces")
 
     relevance_score = getattr(opportunity, "relevance_score", None)
     if relevance_score is not None and relevance_score >= 40:
@@ -186,6 +199,7 @@ def score_opportunity_text(opportunity: Any) -> dict[str, Any]:
         "negative_factors": negative_factors,
         "verification_needed": verification_needed,
         "suggested_review_status": _suggested_review_status(score, disqualified),
+        "hard_exclusion": federal_identity_match,
     }
 
 
@@ -200,7 +214,10 @@ TERMINAL_REVIEW_STATUSES = {"Do Not Pursue", "Archived"}
 
 
 def apply_scored_review_status(
-    opportunity: Any, suggested: str, allow_terminal: bool = True
+    opportunity: Any,
+    suggested: str,
+    allow_terminal: bool = True,
+    force_unreviewed_terminal: bool = False,
 ) -> None:
     """Apply a suggested review status without overriding a human decision.
 
@@ -215,10 +232,23 @@ def apply_scored_review_status(
     manual/CLI use.
     """
     current = getattr(opportunity, "review_status", None)
-    if current in (None, "", "New"):
+    unreviewed_needs_review = (
+        force_unreviewed_terminal
+        and suggested in TERMINAL_REVIEW_STATUSES
+        and current == "Needs Review"
+        and getattr(opportunity, "reviewed_at", None) is None
+    )
+    if current in (None, "", "New") or unreviewed_needs_review:
         if not allow_terminal and suggested in TERMINAL_REVIEW_STATUSES:
             suggested = "Needs Review"
         opportunity.review_status = suggested
+
+
+def _identity_text(opportunity: Any) -> str:
+    """The fields that say WHO issued the opportunity, for hard exclusions."""
+    fields = ("title", "agency", "source", "source_url")
+    values = [str(getattr(opportunity, field, "") or "") for field in fields]
+    return " ".join(values).lower()
 
 
 def _opportunity_text(opportunity: Any) -> str:

@@ -70,6 +70,62 @@ def test_non_security_opportunity_is_no_bid():
     assert "Non-security opportunity" in result["negative_factors"]
 
 
+def test_federal_security_opportunity_is_hard_exclusion():
+    opp = make_opp(
+        title="National Cemetery Administration - Unarmed Security Guards",
+        agency="Department of Veterans Affairs",
+        description="Provide unarmed security guard services.",
+        due_date=_utc_now() + timedelta(days=30),
+        relevance_decision="Relevant",
+        relevance_score=90,
+    )
+    result = score_opportunity_text(opp)
+    assert result["decision"] == "No Bid"
+    assert result["suggested_review_status"] == "Do Not Pursue"
+    assert result["hard_exclusion"] is True
+    assert "Federal opportunity outside state/local scope" in result["negative_factors"]
+
+
+def test_various_departments_phrase_is_not_federal():
+    # "variouS DEPARTMENTs" contains the substring "us department"; word-bounded
+    # matching must not treat it as a federal signal.
+    opp = make_opp(
+        title="Security Guard Services for Various Departments",
+        agency="City of Fresno",
+        description="Unarmed security guard services for various departments.",
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    result = score_opportunity_text(opp)
+    assert result["hard_exclusion"] is False
+    assert "Federal opportunity outside state/local scope" not in result["negative_factors"]
+
+
+def test_state_department_of_veterans_affairs_is_not_federal():
+    opp = make_opp(
+        title="Veterans Home Security Guard Services",
+        agency="California Department of Veterans Affairs",
+        description="Provide unarmed security guard services at the Veterans Home.",
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    result = score_opportunity_text(opp)
+    assert result["hard_exclusion"] is False
+    assert "Federal opportunity outside state/local scope" not in result["negative_factors"]
+
+
+def test_federal_mention_in_notes_penalizes_but_never_hard_excludes():
+    # Only the issuer-identity fields (title/agency/source) may trigger the
+    # unattended terminal flip; a note mentioning "federal agency" must not.
+    opp = make_opp(
+        title="Security Guard Services",
+        agency="City of Mesa",
+        notes="Operator confirmed this is NOT a federal agency posting.",
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    result = score_opportunity_text(opp)
+    assert result["hard_exclusion"] is False
+    assert "Federal opportunity outside state/local scope" in result["negative_factors"]
+
+
 def test_security_without_license_terms_flags_verification():
     opp = make_opp(
         title="Security Guard Services",
@@ -156,6 +212,30 @@ def test_apply_scored_review_status_no_terminal_caps_at_needs_review():
 def test_apply_scored_review_status_no_terminal_still_allows_needs_review():
     opp = make_opp(review_status="New")
     apply_scored_review_status(opp, "Needs Review", allow_terminal=False)
+    assert opp.review_status == "Needs Review"
+
+
+def test_apply_scored_review_status_can_force_unreviewed_hard_exclusion():
+    opp = make_opp(review_status="Needs Review")
+    opp.reviewed_at = None
+    apply_scored_review_status(
+        opp,
+        "Do Not Pursue",
+        allow_terminal=True,
+        force_unreviewed_terminal=True,
+    )
+    assert opp.review_status == "Do Not Pursue"
+
+
+def test_apply_scored_review_status_force_preserves_reviewed_human_decision():
+    opp = make_opp(review_status="Needs Review")
+    opp.reviewed_at = _utc_now()
+    apply_scored_review_status(
+        opp,
+        "Do Not Pursue",
+        allow_terminal=True,
+        force_unreviewed_terminal=True,
+    )
     assert opp.review_status == "Needs Review"
 
 

@@ -13,6 +13,7 @@ from app.schemas import (
     NEXT_ACTION_CHOICES,
     OpportunityReviewUpdate,
     SourceConfigRead,
+    SourceConfigUpdate,
 )
 
 
@@ -71,3 +72,25 @@ def test_valid_review_status_accepted():
 def test_invalid_priority_rejected():
     with pytest.raises(ValidationError):
         OpportunityReviewUpdate(priority="Urgent")
+
+
+def test_source_config_json_is_exposed_and_validated():
+    read = SourceConfigRead(
+        id=1,
+        name="Portal",
+        source_type="authenticated_browser",
+        base_url="https://example.gov",
+        enabled=True,
+        config_json='{"list_url": "https://example.gov/bids"}',
+        created_at=datetime(2026, 1, 1),
+    )
+    assert "list_url" in read.config_json
+
+    update = SourceConfigUpdate(config_json='{"row_selector": "tr"}')
+    assert update.config_json == '{"row_selector": "tr"}'
+
+    with pytest.raises(ValidationError):
+        SourceConfigUpdate(config_json="not json")
+
+    with pytest.raises(ValidationError):
+        SourceConfigUpdate(config_json='["not", "an", "object"]')

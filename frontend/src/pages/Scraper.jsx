@@ -112,7 +112,11 @@ export default function Scraper() {
     try {
       setScraping("enabled");
       const result = await scrapeEnabledSources();
-      setMessage(formatResult(result));
+      const archivedCount = result.archived?.archived_count ?? 0;
+      const archivedSuffix = archivedCount
+        ? `, ${archivedCount} expired archived`
+        : "";
+      setMessage(`${formatResult(result)}${archivedSuffix}`);
       setError("");
     } catch (err) {
       setError(err.message || "Failed to scrape enabled sources.");

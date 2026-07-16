@@ -47,6 +47,16 @@ def _ok_result():
     }
 
 
+def _failed_result():
+    return {
+        "records_found": 0,
+        "created_count": 0,
+        "updated_count": 0,
+        "skipped_duplicates": 0,
+        "errors": ["Portal session expired"],
+    }
+
+
 def test_batch_continues_past_failing_source(sources_client, monkeypatch):
     _seed_sources(sources_client._engine, ["Bad Source", "Good Source"])
 
@@ -82,3 +92,20 @@ def test_single_source_scrape_still_502_on_failure(sources_client, monkeypatch):
 
     response = sources_client.post(f"/sources/{ids['Bad Source']}/scrape")
     assert response.status_code == 502
+
+
+def test_single_source_scrape_persists_failure_when_result_has_errors(
+    sources_client, monkeypatch
+):
+    ids = _seed_sources(sources_client._engine, ["Expired Portal"])
+
+    monkeypatch.setattr("app.routers.sources.scrape_source", lambda source: _failed_result())
+
+    response = sources_client.post(f"/sources/{ids['Expired Portal']}/scrape")
+    assert response.status_code == 200
+    assert response.json()["errors"] == ["Portal session expired"]
+
+    with Session(sources_client._engine) as session:
+        source = session.get(SourceConfig, ids["Expired Portal"])
+        assert source.last_scrape_status == "failed"
+        assert "1 errors" in source.last_scrape_summary

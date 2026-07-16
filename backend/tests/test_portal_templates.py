@@ -68,6 +68,11 @@ def test_bidnet_template_is_authenticated_browser():
     tpl = get_template("bidnet")
     assert tpl["source_type"] == "authenticated_browser"
     assert tpl["login_url"] == "https://www.bidnetdirect.com/"
+    config = tpl["config_json"]
+    assert config["search_keywords"] == ["California", "Texas"]
+    assert config["search_input_selector"] == "#solicitationSingleBoxSearch"
+    assert config["search_submit_selector"] == "#topSearchButton"
+    assert config["state_filter"] == ["CA", "TX"]
 
 
 def test_add_portal_from_template(session):

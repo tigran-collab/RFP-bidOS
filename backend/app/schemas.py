@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -277,6 +278,7 @@ class SourceConfigCreate(BaseModel):
     auth_status: str | None = "Not Configured"
     portal_type: str | None = None
     state: str | None = None
+    config_json: str | None = None
 
     @field_validator("credential_type")
     @classmethod
@@ -322,6 +324,11 @@ class SourceConfigCreate(BaseModel):
             },
             "portal_type",
         )
+
+    @field_validator("config_json")
+    @classmethod
+    def validate_config_json(cls, value: str | None) -> str | None:
+        return _validate_json_object(value, "config_json")
 
 
 class SourceConfigUpdate(BaseModel):
@@ -341,6 +348,7 @@ class SourceConfigUpdate(BaseModel):
     auth_status: str | None = None
     portal_type: str | None = None
     state: str | None = None
+    config_json: str | None = None
 
     @field_validator("credential_type")
     @classmethod
@@ -386,6 +394,11 @@ class SourceConfigUpdate(BaseModel):
             },
             "portal_type",
         )
+
+    @field_validator("config_json")
+    @classmethod
+    def validate_config_json(cls, value: str | None) -> str | None:
+        return _validate_json_object(value, "config_json")
 
 
 class SourceConfigRead(SourceConfigCreate):
@@ -431,3 +444,15 @@ def _validate_choice(value: str | None, allowed: set[str | None], field_name: st
         return value
     allowed_values = ", ".join(sorted(item for item in allowed if item is not None))
     raise ValueError(f"{field_name} must be one of: {allowed_values}")
+
+
+def _validate_json_object(value: str | None, field_name: str) -> str | None:
+    if value in (None, ""):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return value

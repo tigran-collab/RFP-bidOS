@@ -19,6 +19,12 @@ const REVIEW_STATUSES = [
   "Watchlist",
   "Archived",
 ];
+// Archived opportunities have their own tab and are hidden from this queue, so
+// they are not offered as a filter here (the per-row setter still allows
+// manually archiving a row).
+const STATUS_FILTER_OPTIONS = REVIEW_STATUSES.filter(
+  (status) => status !== "Archived",
+);
 const PRIORITIES = ["High", "Medium", "Low"];
 const DEADLINE_RISKS = [
   "High",
@@ -230,7 +236,7 @@ export default function ReviewQueue({ onOpenOpportunity }) {
             onChange={(event) => setStatusFilter(event.target.value)}
           >
             <option value="">All</option>
-            {REVIEW_STATUSES.map((status) => (
+            {STATUS_FILTER_OPTIONS.map((status) => (
               <option key={status} value={status}>
                 {status}
               </option>

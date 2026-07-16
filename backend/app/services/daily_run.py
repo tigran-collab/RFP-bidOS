@@ -1,8 +1,9 @@
 """
-One-command daily intake: scrape enabled sources, score all opportunities, and
-build a notification digest. Scraping reuses the same per-source helper the
-`scrape-enabled-sources` CLI command uses; scoring reuses the rules-based
-scorer. Factored so it can be tested offline by skipping the scrape step.
+One-command daily intake: scrape enabled sources, score opportunities, archive
+past-deadline opportunities, and build a notification digest. Scraping reuses
+the same per-source helper the `scrape-enabled-sources` CLI command uses;
+scoring reuses the rules-based scorer. Factored so it can be tested offline by
+skipping the scrape step.
 """
 
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from datetime import UTC, datetime
 from sqlmodel import select
 
 from app.models import Opportunity, SourceConfig
+from app.services.archiver import archive_past_deadline_opportunities
 from app.services.notifications import build_digest
 from app.services.scorer import apply_scored_review_status, score_opportunity_text
 
@@ -55,12 +57,14 @@ def _scrape_enabled_sources(session) -> dict:
             summary["errors"].extend(
                 f"{source.name}: {err}" for err in result["errors"]
             )
+        status = "failed" if result.get("errors") else "completed"
         summary["per_source"].append(
             {
                 "source": source.name,
-                "status": "completed",
+                "status": status,
                 "created": result.get("created_count", 0),
                 "updated": result.get("updated_count", 0),
+                "errors": result.get("errors", []),
             }
         )
     return summary
@@ -100,7 +104,8 @@ def _score_all(session) -> int:
         apply_scored_review_status(
             opportunity,
             scoring_result["suggested_review_status"],
-            allow_terminal=False,
+            allow_terminal=bool(scoring_result.get("hard_exclusion")),
+            force_unreviewed_terminal=bool(scoring_result.get("hard_exclusion")),
         )
         if opportunity.review_status != status_before:
             dirty = True
@@ -120,10 +125,12 @@ def daily_run(session, do_scrape: bool = True, days: int = 7) -> dict:
         scrape_summary = _scrape_enabled_sources(session)
 
     scored = _score_all(session)
+    archived = archive_past_deadline_opportunities(session)
     digest = build_digest(session, days=days)
 
     return {
         "scrape": scrape_summary,
         "scored": scored,
+        "archived": archived,
         "digest": digest,
     }

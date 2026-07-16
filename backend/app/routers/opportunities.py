@@ -28,11 +28,18 @@ from app.schemas import (
     PursuitPrepRequest,
     RequirementRead,
 )
+from app.services.archiver import archive_past_deadline_opportunities
 from app.services.ai_evaluator import (
     LOCAL_AI_UNAVAILABLE,
+    OLLAMA_GENERATE_FAILED,
+    OLLAMA_TIMEOUT,
     evaluate_opportunity_with_local_ai,
 )
 from app.services.ai_summary import summarize_opportunity
+from app.services.document_agent import (
+    analyze_opportunity_documents,
+    get_document_brief,
+)
 from app.services.downloader import download_documents_for_opportunity
 from app.services.parser import STATUS_NOT_DOWNLOADED, parse_documents_for_opportunity
 from app.services.portal_document_downloader import download_portal_documents_headed
@@ -117,6 +124,12 @@ def review_queue(
         latest_qa = {opp.id: qa_by_opp.get(opp.id) for opp in opportunities}
 
     def keep(opp: Opportunity) -> bool:
+        # Archived opportunities live in their own "Archived" view. Keep them
+        # out of the working queue unless the caller explicitly asks for them
+        # (status="Archived"), so the daily queue is never cluttered by expired
+        # bids the auto-archiver has already set aside.
+        if (opp.review_status or "New") == "Archived" and status != "Archived":
+            return False
         if status and (opp.review_status or "New") != status:
             return False
         if priority and (opp.priority or "") != priority:
@@ -249,6 +262,18 @@ def prioritize_opportunities() -> dict:
         return {"updated": updated}
 
 
+@router.post("/archive-past-deadlines")
+def archive_past_deadlines() -> dict:
+    """Archive active opportunities whose submission deadline has passed.
+
+    Non-destructive: rows are marked "Archived" (moved to the Archived tab),
+    never deleted. Mirrors the daily run's archive step so a UI-only operator
+    can clear expired bids on demand.
+    """
+    with Session(engine) as session:
+        return archive_past_deadline_opportunities(session)
+
+
 @router.get("/{opportunity_id}", response_model=OpportunityRead)
 def get_opportunity(opportunity_id: int) -> Opportunity:
     with Session(engine) as session:
@@ -283,8 +308,14 @@ def update_opportunity(opportunity_id: int, payload: OpportunityUpdate) -> Oppor
         if opportunity is None:
             raise HTTPException(status_code=404, detail="Opportunity not found")
 
-        for field, value in payload.model_dump(exclude_unset=True).items():
+        updates = payload.model_dump(exclude_unset=True)
+        for field, value in updates.items():
             setattr(opportunity, field, value)
+        # A review_status set through the generic editor is a human decision
+        # just like one set via /review — stamp reviewed_at so the daily run's
+        # scorer never overrides it (see scorer.apply_scored_review_status).
+        if "review_status" in updates:
+            opportunity.reviewed_at = utc_now()
         opportunity.updated_at = utc_now()
 
         session.add(opportunity)
@@ -384,12 +415,56 @@ def ai_evaluate_opportunity(opportunity_id: int) -> dict:
         error = result.get("error")
         if error == LOCAL_AI_UNAVAILABLE:
             raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        if error == OLLAMA_TIMEOUT:
+            raise HTTPException(status_code=504, detail=OLLAMA_TIMEOUT)
+        if error and str(error).startswith(OLLAMA_GENERATE_FAILED):
+            raise HTTPException(status_code=502, detail=error)
         # Mirror /extract-requirements: an invalid-JSON model response is a
         # 502, not a silent HTTP 200 carrying an {"error": ...} body. The
         # success shape (result["opportunity"]/["evaluation"]) is unchanged.
         if error == AI_EVALUATE_INVALID_JSON:
             raise HTTPException(status_code=502, detail=AI_EVALUATE_INVALID_JSON)
         return result
+
+
+@router.post("/{opportunity_id}/analyze-documents")
+def analyze_documents(
+    opportunity_id: int,
+    refresh: bool = Query(False, description="Re-analyze documents that already have an analysis"),
+) -> dict:
+    """Run the local AI document agent over the opportunity's parsed files."""
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        result = analyze_opportunity_documents(opportunity_id, session, refresh=refresh)
+        error = result.get("error")
+        if error == LOCAL_AI_UNAVAILABLE:
+            raise HTTPException(status_code=503, detail=LOCAL_AI_UNAVAILABLE)
+        if error == OLLAMA_TIMEOUT:
+            raise HTTPException(status_code=504, detail=OLLAMA_TIMEOUT)
+        if error and str(error).startswith(OLLAMA_GENERATE_FAILED):
+            raise HTTPException(status_code=502, detail=error)
+        if error:
+            raise HTTPException(status_code=409, detail=error)
+        return result
+
+
+@router.get("/{opportunity_id}/document-brief")
+def document_brief(opportunity_id: int) -> dict:
+    """Return the stored document brief and per-file analyses."""
+    with Session(engine) as session:
+        opportunity = session.get(Opportunity, opportunity_id)
+        if opportunity is None:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        payload = get_document_brief(opportunity_id, session)
+        if payload is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No document analysis yet. Run analyze-documents first.",
+            )
+        return payload
 
 
 @router.post("/{opportunity_id}/ai-summary")

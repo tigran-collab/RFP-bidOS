@@ -115,7 +115,7 @@ def test_at_risk_bucket(session):
 
 
 def test_counts_and_render(session):
-    opps = _seed(session)
+    _seed(session)
     digest = build_digest(session, days=7)
     counts = digest["counts"]
     assert counts["new_opportunities"] == len(digest["new_opportunities"])

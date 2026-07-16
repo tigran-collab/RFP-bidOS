@@ -56,6 +56,9 @@ def test_daily_run_offline(session):
 
     assert result["scrape"] == {"skipped": True}
     assert result["scored"] >= len(opps)
+    assert result["archived"]["archived_count"] == 1
+    session.refresh(opps[2])
+    assert opps[2].review_status == "Archived"
 
     digest = result["digest"]
     assert "new_opportunities" in digest
@@ -66,9 +69,9 @@ def test_daily_run_offline(session):
     # Upcoming deadline bucket should include the future-due relevant opp.
     upcoming_ids = {item["id"] for item in digest["upcoming_deadlines"]}
     assert opps[0].id in upcoming_ids
-    # At-risk should include the past-due opp.
+    # Past-due opportunities are archived before the digest is built.
     at_risk_ids = {item["id"] for item in digest["at_risk"]}
-    assert opps[2].id in at_risk_ids
+    assert opps[2].id not in at_risk_ids
 
 
 def test_daily_run_never_auto_declines_new_bid(session):
@@ -94,6 +97,26 @@ def test_daily_run_never_auto_declines_new_bid(session):
     daily_run(session, do_scrape=False)
     session.refresh(sparse)
     assert sparse.review_status == "Needs Review"
+
+
+def test_daily_run_auto_excludes_federal_scope(session):
+    federal = Opportunity(
+        title="National Cemetery Administration - Unarmed Security Guards",
+        agency="Department of Veterans Affairs",
+        relevance_decision="Relevant",
+        review_status="Needs Review",
+        created_at=_utc_now() - timedelta(hours=1),
+        due_date=_utc_now() + timedelta(days=30),
+    )
+    session.add(federal)
+    session.commit()
+    session.refresh(federal)
+
+    daily_run(session, do_scrape=False)
+
+    session.refresh(federal)
+    assert federal.review_status == "Do Not Pursue"
+    assert "Federal opportunity outside state/local scope" in federal.bid_reason
 
 
 def test_score_all_is_noop_when_nothing_changes(session):

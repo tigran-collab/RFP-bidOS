@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine
 
 from app import models  # noqa: F401
+from app import kb_models  # noqa: F401  (registers knowledge-base tables)
 from app.config import get_settings, sqlite_file_path_from_url
 
 settings = get_settings()

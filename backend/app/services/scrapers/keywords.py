@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 
@@ -105,6 +106,31 @@ FEDERAL_SCOPE_KEYWORDS = (
     "federal government",
 )
 
+# State agencies that share a federal department's name are state/local scope,
+# not federal: "California Department of Veterans Affairs" runs the Veterans
+# Homes, and CA/NV have their own Departments of Justice/Defense. Strip the
+# state-qualified phrase before federal matching so only unqualified or
+# US-qualified mentions count.
+_STATE_QUALIFIED_FEDERAL_LOOKALIKE_RE = re.compile(
+    r"\b(?:state of\s+)?(?:california|texas|nevada|arizona)[.,]?\s+"
+    r"department of (?:veterans affairs|justice|defense)\b"
+)
+
+
+def matches_federal_scope(text: str) -> list[str]:
+    """Return the federal-scope keywords found in ``text``, word-bounded.
+
+    Substring matching is not safe here: "us department" appears inside
+    ordinary phrases like "services for variouS DEPARTMENTs", and a false
+    federal hit disqualifies the opportunity outright.
+    """
+    cleaned = _STATE_QUALIFIED_FEDERAL_LOOKALIKE_RE.sub(" ", text)
+    return [
+        keyword
+        for keyword in FEDERAL_SCOPE_KEYWORDS
+        if re.search(rf"\b{re.escape(keyword)}\b", cleaned)
+    ]
+
 AS_NEEDED_WARNING_KEYWORDS = (
     "as needed",
     "as-needed",
@@ -209,7 +235,7 @@ def score_candidate_relevance(candidate) -> dict:
     secondary_body = _matches(body, SECONDARY_SECURITY_KEYWORDS)
     negative_title = _matches(title, NEGATIVE_KEYWORDS)
     negative_body = _matches(body, NEGATIVE_KEYWORDS)
-    federal_scope = _matches(combined, FEDERAL_SCOPE_KEYWORDS)
+    federal_scope = matches_federal_scope(combined)
     as_needed = _matches(combined, AS_NEEDED_WARNING_KEYWORDS)
     procurement_title = _matches(title, PROCUREMENT_KEYWORDS)
     procurement_any = _matches(combined, PROCUREMENT_KEYWORDS)

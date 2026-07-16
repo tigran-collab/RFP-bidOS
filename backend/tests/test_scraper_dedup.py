@@ -10,8 +10,9 @@ from types import SimpleNamespace
 
 from sqlmodel import select
 
-from app.models import Opportunity
+from app.models import Document, Opportunity
 from app.services.scraper import (
+    _attach_document_urls,
     _create_opportunity,
     _find_existing_opportunity,
     _update_opportunity_if_safe,
@@ -261,3 +262,30 @@ def test_config_agency_fallback_replaced_by_enrichment(session):
     )
     _update_opportunity_if_safe(opportunity, enriched, source)
     assert opportunity.agency == "City of Carson"
+
+
+def test_document_url_dedup_is_scoped_to_opportunity(session):
+    url = "https://example.gov/shared/addendum.pdf"
+    first = Opportunity(title="Guard Services A")
+    second = Opportunity(title="Guard Services B")
+    session.add(first)
+    session.add(second)
+    session.commit()
+    session.refresh(first)
+    session.refresh(second)
+
+    assert _attach_document_urls(session, first, [url]) == {
+        "discovered": 1,
+        "skipped": 0,
+    }
+    assert _attach_document_urls(session, second, [url]) == {
+        "discovered": 1,
+        "skipped": 0,
+    }
+    assert _attach_document_urls(session, first, [url]) == {
+        "discovered": 0,
+        "skipped": 1,
+    }
+
+    rows = session.exec(select(Document).where(Document.source_url == url)).all()
+    assert {row.opportunity_id for row in rows} == {first.id, second.id}

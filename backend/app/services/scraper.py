@@ -8,6 +8,11 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import Document, Opportunity
+from app.services.region import (
+    allowed_states_label,
+    is_out_of_region_state,
+    normalize_state_code,
+)
 from app.services.scrapers import (
     AuthenticatedBrowserAdapter,
     GenericPublicAdapter,
@@ -28,11 +33,26 @@ AUTH_REQUIRED_MESSAGE = (
     "This source requires credentials. Authenticated scraping is not enabled in this phase."
 )
 
+BLOCKING_DIAGNOSTIC_MARKERS = (
+    "requires config_json",
+    "session expired",
+    "not established",
+    "no persisted browser profile",
+    "playwright is not installed",
+    "playwright unavailable",
+    "authenticated browser fetch failed",
+    "planetbids fetch failed",
+)
+
 
 def preview_source(
     source_config, detail_limit: int | None = None, include_filtered: bool = False
 ) -> dict:
     result = _empty_result()
+    region_message = _region_skip_message(source_config)
+    if region_message:
+        result["errors"].append(region_message)
+        return result
     skip_message = _auth_skip_message(source_config)
     if skip_message:
         result["errors"].append(skip_message)
@@ -62,6 +82,11 @@ def scrape_source(source_config) -> dict:
 
     if not getattr(source_config, "enabled", False):
         result["errors"].append("Source is disabled")
+        return result
+
+    region_message = _region_skip_message(source_config)
+    if region_message:
+        result["errors"].append(region_message)
         return result
 
     skip_message = _auth_skip_message(source_config)
@@ -127,7 +152,9 @@ def _scrape_candidates(
 
     try:
         candidates = adapter.scrape(source_config)
-        result["diagnostics"].extend(getattr(adapter, "diagnostics", []) or [])
+        diagnostics = getattr(adapter, "diagnostics", []) or []
+        result["diagnostics"].extend(diagnostics)
+        result["errors"].extend(_blocking_diagnostics(diagnostics))
         return candidates
     except requests.RequestException as exc:
         result["errors"].append(str(exc))
@@ -269,6 +296,24 @@ def _relevance_counts(
         ),
         "as_needed_warning_count": sum(1 for c in all_scored if c.as_needed_matches),
     }
+
+
+def _region_skip_message(source_config) -> str | None:
+    """Skip a source whose state is outside the operating region (CA/TX).
+
+    Multi-state aggregators (BidNet) carry no single state — their candidates
+    are filtered per-row by the adapter — so only a source with a DEFINITE
+    out-of-region state tag is gated out here. This is the hard guarantee that
+    no out-of-region bid is ever ingested even if such a source is re-enabled.
+    """
+    state = getattr(source_config, "state", None)
+    if is_out_of_region_state(state):
+        code = normalize_state_code(state) or state
+        return (
+            f"Source state {code} is outside the operating region "
+            f"({allowed_states_label()}); skipped."
+        )
+    return None
 
 
 def _auth_skip_message(source_config) -> str | None:
@@ -498,7 +543,7 @@ def _as_needed_warning_text() -> str:
 def _attach_document_urls(
     session: Session, opportunity: Opportunity, document_urls: list[str]
 ) -> dict:
-    """Create pending Document records for discovered URLs, deduped by URL.
+    """Create pending Document records for discovered URLs, scoped to this bid.
 
     Returns {"discovered": n, "skipped": n}.
     """
@@ -506,7 +551,12 @@ def _attach_document_urls(
     if opportunity.id is None:
         return counts
     for url in document_urls:
-        existing = session.exec(select(Document).where(Document.source_url == url)).first()
+        existing = session.exec(
+            select(Document).where(
+                Document.opportunity_id == opportunity.id,
+                Document.source_url == url,
+            )
+        ).first()
         if existing is not None:
             counts["skipped"] += 1
             continue
@@ -586,6 +636,15 @@ def _empty_result() -> dict:
         "diagnostics": [],
         "candidates": [],
     }
+
+
+def _blocking_diagnostics(diagnostics: list[str]) -> list[str]:
+    errors: list[str] = []
+    for diagnostic in diagnostics:
+        lowered = diagnostic.lower()
+        if any(marker in lowered for marker in BLOCKING_DIAGNOSTIC_MARKERS):
+            errors.append(diagnostic)
+    return errors
 
 
 def _utc_now() -> datetime:

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   aiEvaluateOpportunity,
+  analyzeOpportunityDocuments,
   attachManualDocumentUrl,
   deleteOpportunity,
   downloadDocument,
@@ -10,6 +11,7 @@ import {
   extractOpportunityLogistics,
   extractOpportunityRequirements,
   generateAiSummary,
+  getDocumentBrief,
   getDocumentFileUrl,
   getLogisticsQA,
   getOpportunity,
@@ -127,6 +129,8 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
   const [aiEvaluating, setAiEvaluating] = useState(false);
   const [aiSummarizing, setAiSummarizing] = useState(false);
   const [aiSummaryNotice, setAiSummaryNotice] = useState("");
+  const [analyzingDocs, setAnalyzingDocs] = useState(false);
+  const [docBrief, setDocBrief] = useState(null);
   const [extracting, setExtracting] = useState(false);
   const [extractingLogistics, setExtractingLogistics] = useState(false);
   const [runningQA, setRunningQA] = useState(false);
@@ -169,6 +173,12 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
       setRequirements(requirementsResult ?? []);
       setLogisticsQA(qaResult && qaResult.qa_status ? qaResult : null);
       setError("");
+      // The brief 404s until the agent has run once — absence is normal.
+      try {
+        setDocBrief(await getDocumentBrief(opportunityId));
+      } catch {
+        setDocBrief(null);
+      }
     } catch (err) {
       setError(err.message || errorMessage);
     } finally {
@@ -459,6 +469,31 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
     }
   }
 
+  async function runDocumentAgent(refresh = false) {
+    try {
+      setAnalyzingDocs(true);
+      const result = await analyzeOpportunityDocuments(opportunityId, refresh);
+      try {
+        setDocBrief(await getDocumentBrief(opportunityId));
+      } catch {
+        setDocBrief(null);
+      }
+      const warnings = result.errors?.length ? ` Warnings: ${result.errors.join("; ")}` : "";
+      setActionMessage(
+        `Document agent: ${result.documents_analyzed} analyzed, ` +
+          `${result.documents_skipped} already analyzed.${warnings}`,
+      );
+      setActionError("");
+    } catch (err) {
+      setActionError(
+        err.message ||
+          "Document analysis failed. Start Ollama and make sure documents are parsed.",
+      );
+    } finally {
+      setAnalyzingDocs(false);
+    }
+  }
+
   async function runRequirementExtraction() {
     try {
       setExtracting(true);
@@ -490,6 +525,7 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
     parsing ||
     aiEvaluating ||
     aiSummarizing ||
+    analyzingDocs ||
     extracting ||
     extractingLogistics ||
     runningQA;
@@ -560,6 +596,14 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
             onClick={runAiEvaluation}
           >
             {aiEvaluating ? "Evaluating..." : "Local AI Evaluation"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={() => runDocumentAgent(false)}
+          >
+            {analyzingDocs ? "Analyzing Documents..." : "Analyze Documents"}
           </button>
           <button
             className="secondary-button"
@@ -818,6 +862,95 @@ export default function OpportunityDetail({ opportunityId, onNavigate }) {
             value={latestEvaluation.recommended_next_action}
           />
         </dl>
+      )}
+      <h2>Local AI Document Brief</h2>
+      {!docBrief ? (
+        <p>
+          No document analysis yet. Download and parse documents, then use
+          Analyze Documents (local Ollama only) to work through every file.
+        </p>
+      ) : (
+        <div>
+          {docBrief.brief?.summary ? <p>{docBrief.brief.summary}</p> : null}
+          {docBrief.brief?.red_flags?.length ? (
+            <div>
+              <strong>Red flags</strong>
+              <ul>
+                {docBrief.brief.red_flags.map((flag) => (
+                  <li key={flag}>{flag}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {docBrief.brief?.open_questions?.length ? (
+            <div>
+              <strong>Open questions for the agency</strong>
+              <ul>
+                {docBrief.brief.open_questions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {docBrief.brief?.facts?.length ? (
+            <details>
+              <summary>
+                Extracted facts ({docBrief.brief.facts.length}, cited by file and chunk)
+              </summary>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Fact</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docBrief.brief.facts.map((fact, index) => (
+                    <tr key={`${fact.source_file}-${fact.chunk}-${index}`}>
+                      <td>{fact.category}</td>
+                      <td>{fact.detail}</td>
+                      <td>
+                        {fact.source_file} · chunk {fact.chunk}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          ) : null}
+          {docBrief.documents?.length ? (
+            <details>
+              <summary>Per-document analyses ({docBrief.documents.length})</summary>
+              <ul>
+                {docBrief.documents.map((doc) => (
+                  <li key={doc.id}>
+                    <strong>
+                      {documents.find((d) => d.id === doc.document_id)?.filename ||
+                        `Document ${doc.document_id}`}
+                    </strong>{" "}
+                    — {doc.status}
+                    {doc.truncated ? " (truncated: file larger than the analysis cap)" : ""}
+                    {doc.error ? ` — ${doc.error}` : ""}
+                    {doc.summary ? <p>{doc.summary}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          <p className="muted-text">
+            Generated by the local AI document agent ({docBrief.brief?.model_name || "local model"}
+            ). Verify every fact against the source files before relying on it.
+          </p>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy}
+            onClick={() => runDocumentAgent(true)}
+          >
+            {analyzingDocs ? "Re-analyzing..." : "Re-analyze All Documents"}
+          </button>
+        </div>
       )}
       <h2>Requirements / Compliance</h2>
       {!requirements.length ? (

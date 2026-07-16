@@ -21,22 +21,34 @@ from app.services.ai_evaluator import (
     evaluate_opportunity_with_local_ai,
 )
 from app.services.downloader import download_documents_for_opportunity
+from app.services.logistics_extractor import apply_logistics_to_opportunity
+from app.services.logistics_qa import run_logistics_qa
 from app.services.parser import parse_documents_for_opportunity
+from app.services.portal_document_downloader import (
+    download_portal_documents_headed,
+    portal_document_download_available,
+)
 from app.services.requirement_extractor import extract_requirements_with_local_ai
 from app.services.scraper import discover_documents_for_opportunity
 
 STEP_DISCOVER = "discover_documents"
 STEP_DOWNLOAD = "download_documents"
+STEP_PORTAL_DOWNLOAD = "download_portal_documents"
 STEP_PARSE = "parse_documents"
 STEP_AI = "ai_evaluate"
 STEP_REQUIREMENTS = "extract_requirements"
+STEP_LOGISTICS = "extract_logistics"
+STEP_LOGISTICS_QA = "logistics_qa"
 
 DEFAULT_STEPS = [
     STEP_DISCOVER,
     STEP_DOWNLOAD,
+    STEP_PORTAL_DOWNLOAD,
     STEP_PARSE,
     STEP_AI,
     STEP_REQUIREMENTS,
+    STEP_LOGISTICS,
+    STEP_LOGISTICS_QA,
 ]
 VALID_STEPS = set(DEFAULT_STEPS)
 
@@ -70,6 +82,8 @@ def run_pursuit_prep(opportunity_id: int, session, steps: list[str] | None = Non
         "documents_parsed": 0,
         "requirements_extracted": 0,
         "ai_evaluated": False,
+        "logistics_extracted": False,
+        "logistics_qa_ran": False,
     }
 
     for step in requested:
@@ -163,6 +177,31 @@ def _run_step(step: str, opportunity_id: int, session, metrics: dict) -> dict:
                 errors,
             )
 
+        if step == STEP_PORTAL_DOWNLOAD:
+            opportunity = session.get(Opportunity, opportunity_id)
+            available = (
+                portal_document_download_available(opportunity, session)
+                if opportunity is not None
+                else {"available": False, "reason": "Opportunity not found"}
+            )
+            if not available["available"]:
+                return _step_result(
+                    step,
+                    "skipped",
+                    available["reason"],
+                    [],
+                )
+            result = download_portal_documents_headed(opportunity_id, session)
+            metrics["documents_downloaded"] += result.get("downloaded_count", 0)
+            errors = result.get("errors", [])
+            return _step_result(
+                step,
+                "ok" if not errors else "error",
+                f"{result.get('downloaded_count', 0)} portal document(s) downloaded, "
+                f"{result.get('skipped_count', 0)} skipped",
+                errors,
+            )
+
         if step == STEP_PARSE:
             result = parse_documents_for_opportunity(opportunity_id, session)
             metrics["documents_parsed"] += result.get("parsed_count", 0)
@@ -192,6 +231,25 @@ def _run_step(step: str, opportunity_id: int, session, metrics: dict) -> dict:
             count = result.get("requirements_count", 0)
             metrics["requirements_extracted"] += count
             return _step_result(step, "ok", f"{count} requirements extracted", [])
+
+        if step == STEP_LOGISTICS:
+            result = apply_logistics_to_opportunity(opportunity_id, session)
+            if result.get("error"):
+                return _step_result(step, "error", result["error"], [result["error"]])
+            metrics["logistics_extracted"] = True
+            return _step_result(step, "ok", "Logistics extracted", [])
+
+        if step == STEP_LOGISTICS_QA:
+            result = run_logistics_qa(opportunity_id, session)
+            if result.get("error"):
+                return _step_result(step, "error", result["error"], [result["error"]])
+            metrics["logistics_qa_ran"] = True
+            return _step_result(
+                step,
+                "ok",
+                f"Logistics QA: {result.get('qa_status')} ({result.get('risk_level')} risk)",
+                [],
+            )
 
         return _step_result(step, "skipped", "Unknown step", [])
     except Exception as exc:  # defensive: a step failure must not crash the run

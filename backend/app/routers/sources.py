@@ -12,6 +12,7 @@ from app.schemas import (
     SourceConfigUpdate,
 )
 from app.seed_sources import seed_real_sources
+from app.services.archiver import archive_past_deadline_opportunities
 from app.services.scraper import preview_source, scrape_source
 from app.services.scrapers.capabilities import get_source_scraper_capabilities
 from app.services.source_credentials import (
@@ -96,6 +97,16 @@ def scrape_enabled_sources() -> dict:
         summary["documents_skipped"] += result.get("documents_skipped", 0)
         summary["errors"].extend(result["errors"])
         summary["results"].append({"source": source.name, **result})
+
+    # Clear expired bids off the working views after a refresh (mirrors the
+    # daily run). Non-destructive: past-deadline rows move to the Archived tab.
+    # Guarded so an archiver error never discards an otherwise-successful scrape
+    # summary (results are already committed per source above).
+    try:
+        with Session(engine) as session:
+            summary["archived"] = archive_past_deadline_opportunities(session)
+    except Exception as exc:  # noqa: BLE001 - archiving is a best-effort post-step
+        summary["errors"].append(f"archive-past-deadlines: {exc}")
 
     return summary
 
@@ -209,7 +220,9 @@ def _run_scrape_for_source(source: SourceConfig) -> dict:
                 source_record.last_scrape_summary = f"Scrape failed: {message}"
                 session.add(source_record)
             session.commit()
-        raise HTTPException(status_code=502, detail=f"Scrape failed: {message}")
+        raise HTTPException(
+            status_code=502, detail=f"Scrape failed: {message}"
+        ) from exc
 
     status = "failed" if result["errors"] else "completed"
 

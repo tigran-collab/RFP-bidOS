@@ -108,10 +108,14 @@ def test_reseed_still_propagates_curated_config_json(session):
 
 
 def test_seed_new_row_sets_enabled_and_notes_from_curated(session):
-    # With an empty DB, new rows must adopt the curated enabled/notes values.
+    # With an empty DB, new IN-REGION rows must adopt the curated enabled/notes
+    # values. (Out-of-region rows are force-disabled; see test_seed_region.)
     seed_real_sources(session)
 
-    entry = _curated_entry("City of Mesa, AZ - Purchasing Solicitations (Open Data)")
+    entry = _curated_entry(
+        "City of Los Angeles - RAMP Open Bid Opportunities (Open Data)"
+    )
+    assert entry["state"] == "CA" and entry["enabled"] is True
     created = session.exec(
         select(SourceConfig).where(SourceConfig.name == entry["name"])
     ).first()

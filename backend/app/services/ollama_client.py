@@ -53,7 +53,7 @@ def list_ollama_models() -> dict:
         response = requests.get(_api_url("/api/tags"), timeout=5)
         response.raise_for_status()
         payload = response.json()
-    except (requests.RequestException, ValueError) as exc:
+    except (requests.RequestException, ValueError):
         return {
             "available": False,
             "base_url": settings.ollama_base_url,

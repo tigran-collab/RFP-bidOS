@@ -8,6 +8,10 @@ from sqlmodel import select
 from app.models import Document, Opportunity, OpportunityEvaluation
 from app.services.ollama_client import (
     LOCAL_AI_UNAVAILABLE,
+    OLLAMA_GENERATE_FAILED,
+    OLLAMA_TIMEOUT,
+    LocalAIGenerateError,
+    LocalAITimeoutError,
     LocalAIUnavailableError,
     generate_json,
 )
@@ -168,13 +172,17 @@ def evaluate_opportunity_with_local_ai(opportunity_id: int, session) -> dict:
         response = generate_json(prompt)
     except LocalAIUnavailableError:
         return {"error": LOCAL_AI_UNAVAILABLE}
+    except LocalAITimeoutError as exc:
+        return {"error": str(exc) or OLLAMA_TIMEOUT}
+    except LocalAIGenerateError as exc:
+        return {"error": str(exc) or OLLAMA_GENERATE_FAILED}
 
     raw_response = response["raw_response"]
     response_text = response["response_text"]
     model_name = response["model"]
     try:
         parsed = parse_ai_json_response(response_text)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError):
         evaluation = _store_error_evaluation(
             opportunity,
             model_name,

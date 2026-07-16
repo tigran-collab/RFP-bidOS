@@ -82,6 +82,8 @@ Extract only requirements supported by the provided text.
 Do not invent missing requirements.
 If page numbers or sections are visible in the text, include them.
 If page numbers are not clear, leave source_page null.
+Set document_id to one of the Document ID values shown above the supporting text.
+If the supporting document is unclear, leave document_id null.
 Distinguish mandatory requirements from optional/descriptive language.
 Flag missing or unclear information.
 
@@ -120,6 +122,7 @@ Required JSON structure:
   "summary": "short summary of extracted requirements",
   "requirements": [
     {{
+      "document_id": null,
       "requirement_type": "Submission Requirement | Deadline | License | Insurance | Bond | Form | Attachment | Evaluation Criteria | Scope Requirement | Staffing Requirement | Training Requirement | Reporting Requirement | Pricing Requirement | Contract Term | Pre-Bid Requirement | Q&A Requirement | Other",
       "title": "short requirement title",
       "requirement_text": "exact or closely paraphrased requirement",
@@ -260,13 +263,26 @@ def save_extracted_requirements(
 ) -> list[Requirement]:
     now = _utc_now()
     saved: list[Requirement] = []
+    documents_by_id = _documents_by_id(opportunity_id, session)
     for item in extraction_result.get("requirements", []):
+        document_id = _valid_document_id(
+            item.get("document_id"),
+            set(documents_by_id),
+        )
+        if document_id is None and len(documents_by_id) == 1:
+            document_id = next(iter(documents_by_id))
+        source_file = (
+            documents_by_id[document_id].filename
+            if document_id in documents_by_id
+            else _none_or_str(item.get("source_file"))
+        )
         requirement = Requirement(
             opportunity_id=opportunity_id,
-            document_id=None,
+            document_id=document_id,
             requirement_type=_normalize_requirement_type(item.get("requirement_type")),
             title=str(item.get("title") or "Requirement").strip(),
             requirement_text=str(item.get("requirement_text") or "").strip(),
+            source_file=source_file,
             source_page=_parse_int_or_none(item.get("source_page")),
             source_section=_none_or_str(item.get("source_section")),
             mandatory=bool(item.get("mandatory", True)),
@@ -334,6 +350,22 @@ def _parse_int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _documents_by_id(opportunity_id: int, session) -> dict[int, Document]:
+    documents = list(
+        session.exec(
+            select(Document).where(Document.opportunity_id == opportunity_id)
+        ).all()
+    )
+    return {document.id: document for document in documents if document.id is not None}
+
+
+def _valid_document_id(value: Any, valid_ids: set[int]) -> int | None:
+    parsed = _parse_int_or_none(value)
+    if parsed in valid_ids:
+        return parsed
+    return None
 
 
 def _parse_datetime_or_none(value: Any) -> datetime | None:

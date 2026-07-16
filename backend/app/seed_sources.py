@@ -1,5 +1,5 @@
 """
-Curated real-world public procurement sources for CA, TX, NV, and AZ.
+Curated real-world public procurement sources.
 
 Rules:
 - Public pages only. No login-required sources are enabled.
@@ -8,6 +8,10 @@ Rules:
   results.
 - Seeding is idempotent: existing rows are matched by base_url, then name,
   and are never duplicated.
+- Operating region is CA/TX only (see app.services.region). The catalog still
+  lists the previously-supported NV/AZ sources for reference, but any source
+  tagged with an out-of-region state is seeded DISABLED and force-disabled on
+  reseed so nothing outside CA/TX is ever scraped.
 """
 
 import json
@@ -15,6 +19,7 @@ import json
 from sqlmodel import Session, select
 
 from app.models import SourceConfig
+from app.services.region import is_out_of_region_state
 
 AUTH_NOT_REQUIRED = "Not Required"
 
@@ -334,6 +339,11 @@ def seed_real_sources(session: Session) -> dict:
                 if getattr(existing, field) != desired:
                     setattr(existing, field, desired)
                     changed = True
+            # Region is a hard rule, not operator-tunable: an out-of-region
+            # source is force-disabled on reseed even if it was toggled on.
+            if is_out_of_region_state(existing.state) and existing.enabled:
+                existing.enabled = False
+                changed = True
             if changed:
                 session.add(existing)
                 updated += 1
@@ -348,7 +358,9 @@ def seed_real_sources(session: Session) -> dict:
                 base_url=entry["base_url"],
                 portal_type=entry["portal_type"],
                 state=entry["state"],
-                enabled=entry["enabled"],
+                # Out-of-region sources are seeded disabled regardless of the
+                # curated flag; the region rule (CA/TX) overrides.
+                enabled=entry["enabled"] and not is_out_of_region_state(entry["state"]),
                 notes=entry["notes"],
                 config_json=entry.get("config_json"),
                 requires_credentials=False,
